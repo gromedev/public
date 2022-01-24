@@ -1,5 +1,4 @@
 #!/bin/bash
-# Author tmg@venzo.com
 
 if (systemctl -q is-active mdatp); 
 then
