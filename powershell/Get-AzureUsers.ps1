@@ -1,3 +1,7 @@
+<#
+.INFO
+    thomas@grome.dev
+#>
 $scopes = @(
     "User.Read.All"
     "Group.Read.All"
