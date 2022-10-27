@@ -15,13 +15,13 @@ $deviceObjList = Get-IntuneManagedDevice | Where-Object operatingSystem -eq "Win
 
 
 if (($deviceObjList).count -gt 0){
-    Write-Output "Sending sync signal to all Windows devices"
+    Write-Output "Pushing sync."
     foreach ($deviceObj in $deviceObjList) {
         try {
             "id: {0}    OS: {1,-8}    Name: {2,-50}    Owner: {3}" -f $deviceObj.id,$deviceObj.operatingSystem,$deviceObj.deviceName,$deviceObj.emailAddress
             $deviceObj | Invoke-IntuneManagedDeviceSyncDevice -ErrorAction Stop
         } catch {
-            Write-Error "Failed to send signal to $($deviceObj.id)"
+            Write-Error "Failed to push sync to $($deviceObj.id)"
         }
     }
 } else {
