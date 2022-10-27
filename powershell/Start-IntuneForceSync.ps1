@@ -27,3 +27,11 @@ if (($deviceObjList).count -gt 0){
 } else {
     Write-Output "No windows devices found."
 }
+
+
+$Command = Get-ScheduledTask -TaskName "PushLaunch" | Select-Object -ExpandProperty Actions
+
+# Starting the process
+Start-Process -FilePath "$env:windir\system32\deviceenroller.exe" `
+ -Verb Runas `
+ -ArgumentList "$($Command.Arguments)"
