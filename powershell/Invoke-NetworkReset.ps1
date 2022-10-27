@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-    This script attempts to fix being unable to change firewall domain profiles from public to private.
+    Resets network settings. 
+    This script was an attempt to fix being unable to change firewall domain profiles from public to private.
 .AUTHOR
-    tmg@venzo.com
+    thomas@grome.dev
 .EXAMPLE
     Run the script - no individual functions exposed. No need to .source.
 #>
