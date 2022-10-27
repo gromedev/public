@@ -1,12 +1,15 @@
 function Convert-AzureAdObjectIdToSid {
 <#
 .SYNOPSIS
-Convert an Azure AD Object ID to SID
+	Convert an Azure AD Object ID to SID
  
+ .AUTHOR
+ 	thomas@grome.dev
+	
 .DESCRIPTION
-Converts an Azure AD Object ID to a SID.
-To add your own Group as a member of local Administrators, you need to provide its Security Identifier (SID), a unique value of variable length used to identify the Group.
-I recommend a PowerShell script: Convert-AzureAdObjectIdToSid .ps1 (written by Oliver Kieselbach) that allows you to easily convert Azure Group Object ID into SID
+	Converts an Azure AD Object ID to a SID.
+	To add your own Group as a member of local Administrators, you need to provide its Security Identifier (SID), a unique value of variable length used to identify the Group.
+	I recommend a PowerShell script: Convert-AzureAdObjectIdToSid .ps1 (written by Oliver Kieselbach) that allows you to easily convert Azure Group Object ID into SID
 
 Source: https://hmaslowski.com/f/configure-local-admins-via-custom-oma-uri-policy-in-memintune
 
