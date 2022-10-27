@@ -1,0 +1,41 @@
+function Convert-AzureAdObjectIdToSid {
+<#
+.SYNOPSIS
+Convert an Azure AD Object ID to SID
+ 
+.DESCRIPTION
+Converts an Azure AD Object ID to a SID.
+To add your own Group as a member of local Administrators, you need to provide its Security Identifier (SID), a unique value of variable length used to identify the Group.
+I recommend a PowerShell script: Convert-AzureAdObjectIdToSid .ps1 (written by Oliver Kieselbach) that allows you to easily convert Azure Group Object ID into SID
+
+Source: https://hmaslowski.com/f/configure-local-admins-via-custom-oma-uri-policy-in-memintune
+
+.OMA-URI
+./Device/Vendor/MSFT/Policy/Config/RestrictedGroups/ConfigureGroupMembership
+
+.EXAMPLE XML
+<groupmembership>
+	<accessgroup desc = "Administrators">
+		<member name = "Administrator" />
+		<member name = "S-1-5-21-0000000000000000001" />
+		<member name = "S-1-12-1-0000000000000000000" />
+	</accessgroup>
+</groupmembership>
+
+.PARAMETER ObjectID
+The Object ID to convert
+#>
+    param([String] $ObjectId)
+
+    $bytes = [Guid]::Parse($ObjectId).ToByteArray()
+    $array = New-Object 'UInt32[]' 4
+
+    [Buffer]::BlockCopy($bytes, 0, $array, 0, 16)
+    $sid = "S-1-12-1-$array".Replace(' ', '-')
+
+    return $sid
+}
+
+$objectId = ""
+$sid = Convert-AzureAdObjectIdToSid -ObjectId $objectId
+Write-Output $sid
