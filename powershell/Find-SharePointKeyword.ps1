@@ -1,4 +1,8 @@
 ##Require SharePointPnPPowerShellOnline
+<#
+.INFO
+    thomas@grome.dev
+#>
 #Set Parameters
 $SiteURL = "https://DEMO.sharepoint.com/"
 $outputFilePath = "c:\temp"
