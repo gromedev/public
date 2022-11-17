@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    The following REST API call is to get the InTune report data for the tenant
+    The following REST API call is to get the InTune report data for the tenant.
 .AUTHOR
     thomas@grome.dev
 .LINK
