@@ -1,7 +1,9 @@
 .AUTHOR
+
   thomas@grome.dev
 
 .DESCRIPTION
+
   A collection of templates (mainly VBA Macros) developed to trigger Attack Surface Reduction rules in Azure tenants. 
   
   Payloads consist of launching calc.exe - but otherwise fill in whatever code/template you want. 
