@@ -75,7 +75,8 @@ The package will be automatically retrieved from e.g. Ubuntu:
 2
 
 This is the onboarding script that will connect the Linux server to
-Defender for Endpoint. Do not modify it.
+Defender for Endpoint. The example script in this repo has the onboarding code removed. 
+But you can download a full onboarding script from the DfE portal in your tenant.
 
 **Step 3:** Run 3HealthCheck.sh
 
