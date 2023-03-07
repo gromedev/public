@@ -52,14 +52,17 @@ function Get-FirmwareVersion {
             Write-Host "Updating Hotfix"
             try {
                 Update-HotFix
+                Write-Host "Updated. Reboot required. You have 30 seconds to press ctrl+c to abort the reboot. "
+                Start-Sleep -Seconds 30
+                Restart-Computer -Force
             }
             catch {
-                Write-Error "An error occurred while updating the hotfix: $($_.Exception.Message)"
+                Write-Error "Der er sket en fejl. Din idiot. : $($_.Exception.Message)"
             }
         }
     }
     else {
-        Write-Host "No firmware updates have been performed on this device."
+        Write-Host "No firmware updates."
     }
 }
 Get-FirmwareVersion
