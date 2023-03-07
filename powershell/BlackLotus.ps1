@@ -52,7 +52,8 @@ function Get-FirmwareVersion {
             Write-Host "Updating Hotfix"
             try {
                 Update-HotFix
-            } catch {
+            }
+            catch {
                 Write-Error "An error occurred while updating the hotfix: $($_.Exception.Message)"
             }
         }
