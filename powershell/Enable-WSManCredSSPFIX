@@ -53,4 +53,3 @@ if(!(Test-WsMan -Authentication Credssp -ComputerName "$RemoteHostname" -Credent
         Enable-WSManCredSSP -Role "Client" -DelegateComputer "*" -Force -ErrorAction SilentlyContinue
     }
 }
-# ---------------------------------------------
