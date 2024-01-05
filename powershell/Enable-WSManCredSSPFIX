@@ -53,3 +53,21 @@ if(!(Test-WsMan -Authentication Credssp -ComputerName "$RemoteHostname" -Credent
         Enable-WSManCredSSP -Role "Client" -DelegateComputer "*" -Force -ErrorAction SilentlyContinue
     }
 }
+
+<# Undo Script
+
+# Disable CredSSP
+Disable-WSManCredSSP -Role "Client"
+
+# Remove registry changes made by the original script
+$mainpath = 'hklm:\SOFTWARE\Policies\Microsoft\Windows\CredentialsDelegation'
+if (Test-Path $mainpath) {
+    # Remove the registry keys
+    Remove-Item -Path $mainpath -Recurse -Force
+}
+
+# Remove any leftover WSMan CredSSP configuration
+Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WSMAN\Client\CredentialDelegation" -Name "AllowFreshCredentials" -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WSMAN\Client\CredentialDelegation" -Name "AllowFreshCredentialsWhenNTLMOnly" -ErrorAction SilentlyContinue
+
+#>
