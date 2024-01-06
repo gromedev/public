@@ -1,5 +1,9 @@
 <#
 Fix for when trying to remote into a (non-domain joined) HyperV server
+
+If it's still being a little bitch, then run:
+
+set-item WSMan:\localhost\Client\TrustedHosts "*"
 #>
 
 $UserName = ".\Administrator"
