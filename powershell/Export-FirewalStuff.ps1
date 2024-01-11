@@ -7,3 +7,5 @@ $path = "C:\temp\"
 #Export-FirewallRules -Name $RuleName -CSVFile "$path$RuleName.csv"
 #Export-FirewallRules -Name $RuleName -JSON "$path$RuleName.json"
 Import-FirewallRules -JSON "C:\temp\AllowRemoteConnectionToNetBIOS.json"
+
+#Copy-NetFirewallRule -Name "AllowRemoteConnectionToNetBIOS" -PolicyStore ActiveStore -FilePath "C:\temp\AllowRemoteConnectionToNetBIOS.xml"
