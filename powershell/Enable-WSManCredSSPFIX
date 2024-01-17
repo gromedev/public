@@ -6,6 +6,7 @@ If it's still being a little bitch, then run this on the hyperv server:
 set-item WSMan:\localhost\Client\TrustedHosts "*"
 Enter-PSSession -ComputerName 192.168.1.95 -Credential srv-hyperv\administrator
 Enable-WSManCredSSP -Role server
+srv-hyperv\administrator
 
 Enable-WSManCredSSP -Role client -DelegateComputer "*"
 Set-Item WSMan:\localhost\Client\TrustedHosts "*" -Concatenate -Force
