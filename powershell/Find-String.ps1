@@ -1,1 +1,1 @@
-Get-ChildItem -Path 'YourDirectoryPath' -Recurse | Select-String -Pattern 'YourSearchString'
+Get-ChildItem -Path 'YourDirectoryPath' -Recurse | Select-String -Pattern 'merge' -CaseSensitive:$false
