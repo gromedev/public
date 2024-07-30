@@ -1,10 +1,3 @@
-Add-Type -assemblyName System.Windows.Forms;
+#Add-Type -assemblyName System.Windows.Forms;$a=@(1..100);while(1){[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(($a|get-random),($a|get-random));start-sleep -seconds 5}
 
-$a=@(-3..3);
-
-while(1){
-    $X = [System.Windows.Forms.Cursor]::Position.X + ($a|get-random)
-    $Y = [System.Windows.Forms.Cursor]::Position.Y + ($a|get-random)
-    [System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point($x,$y);
-    start-sleep -seconds 59
-}
+Add-Type -AssemblyName System.Windows.Forms;while(1){[Windows.Forms.Cursor]::Position=(Get-Random 100);Start-Sleep 25}
