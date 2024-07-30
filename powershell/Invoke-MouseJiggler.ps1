@@ -34,6 +34,6 @@ $inp.mi.dy = 1
 $inp.mi.dwFlags = [WinAPI.User32]::MOUSEEVENTF_MOVE
 
 while ($true) {
-    [WinAPI.User32]::SendInput(1, [ref]$inp, [System.Runtime.InteropServices.Marshal]::SizeOf($inp))
+    [WinAPI.User32]::SendInput(1, [ref]$inp, [System.Runtime.InteropServices.Marshal]::SizeOf($inp))  > $null #null stops CLI output. Otherwiwse its just 1 1 1 1 ...
     Start-Sleep -Seconds 1
 }
