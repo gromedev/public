@@ -1,0 +1,47 @@
+1366x768 (HD)
+1600x900 (HD+)
+1920x1080 (Full HD)
+2560x1440 (Quad HD / 2K)
+3200x1800 (QHD+)
+3840x2160 (4K UHD)
+5120x2880 (5K)
+7680x4320 (8K UHD)
+10240x5760 (10K UHD)
+15360x8640 (16K UHD)
+1280x720 (HD)
+2048x1152
+4096x2304 (4K DCI)
+6400x3600
+7680x4320 (UHD-2)
+5120x2880 (5K Retina Display)
+
+#temp
+xrandr --newmode "1600x900_60.00" 118.25 1600 1696 1856 2112 900 903 908 934 -hsync +vsync
+xrandr --addmode LVDS-1 "1600x900_60.00"
+xrandr --output LVDS-1 --mode "1600x900_60.00"
+
+#perm
+sudo mkdir -p /etc/X11/xorg.conf.d/
+sudo nano /etc/X11/xorg.conf.d/10-monitor.conf
+
+#conf
+Section "Monitor"
+    Identifier "LVDS-1"
+    Modeline "1600x900_60.00"  118.25  1600 1696 1856 2112  900 903 908 934  -hsync +vsync
+    Option "PreferredMode" "1600x900_60.00"
+EndSection
+
+Section "Screen"
+    Identifier "Screen0"
+    Monitor "LVDS-1"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        Modes "1600x900_60.00"
+    EndSubSection
+EndSection
+
+Section "Device"
+    Identifier "Device0"
+    Driver "intel"  # Use the correct driver for your system (intel, nvidia, etc.)
+EndSection
