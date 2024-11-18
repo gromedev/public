@@ -7,6 +7,8 @@ Test-ADServiceAccount gMSA-Docker
 
 New-CredentialSpec -AccountName gMSA-Docker
 
+# sc config YourServiceName obj= "DOMAIN\gMSA-Docker$" password= ""
+
 # Typically found C:\ProgramData\docker\credentialspecs
 
 # docker run --security-opt "credentialspec=file://gMSA-Docker.json" -d your-container-image
