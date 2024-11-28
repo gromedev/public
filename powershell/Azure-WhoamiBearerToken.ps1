@@ -1,0 +1,1 @@
+Invoke-RestMethod -Uri "https ://https://lnkd.in/gQw_mU7w" -Headers @{ Authorization = "Bearer $token" }
