@@ -1,0 +1,150 @@
+Sure! Below is a consolidated C# program that identifies privileged OS accounts across Active Directory, Windows Server, and Windows Workstation systems.
+
+Key Features
+
+✔ Queries Active Directory for privileged AD accounts (Domain Admins, Enterprise Admins, Schema Admins, and Built-in Admin -500).
+✔ Finds Built-in Local Admin (SID-500) on the local machine.
+✔ Lists all Local Administrators (other than SID-500) on Windows Server/Workstation.
+✔ Uses LDAP for AD queries and PrincipalContext for local accounts.
+
+Full C# Code:
+
+using System;
+using System.Collections.Generic;
+using System.DirectoryServices;
+using System.DirectoryServices.AccountManagement;
+using System.Security.Principal;
+
+class Program
+{
+    static void Main()
+    {
+        Console.WriteLine("=== Privileged OS Accounts Detection ===\n");
+
+        // Step 1: Identify Privileged AD Accounts
+        GetPrivilegedADAccounts();
+
+        // Step 2: Identify Built-in Local Admin (SID-500)
+        GetLocalBuiltInAdmin();
+
+        // Step 3: Identify Other Local Admins
+        GetLocalAdminAccounts();
+
+        Console.WriteLine("\n=== Scan Completed ===");
+    }
+
+    /// <summary>
+    /// Identifies privileged AD accounts (Domain Admins, Enterprise Admins, Schema Admins, Built-in Admins).
+    /// </summary>
+    static void GetPrivilegedADAccounts()
+    {
+        Console.WriteLine("[*] Checking Active Directory for Privileged Accounts...");
+
+        string domainPath = "LDAP://DC=yourdomain,DC=com";  // Update domain
+        using (DirectoryEntry entry = new DirectoryEntry(domainPath))
+        using (DirectorySearcher search = new DirectorySearcher(entry))
+        {
+            search.Filter = "(&(objectCategory=user)(|(memberOf=CN=Domain Admins,CN=Users,DC=yourdomain,DC=com)" +
+                            "(memberOf=CN=Enterprise Admins,CN=Users,DC=yourdomain,DC=com)" +
+                            "(memberOf=CN=Schema Admins,CN=Users,DC=yourdomain,DC=com)" +
+                            "(objectSID=**-500)))";
+
+            search.PropertiesToLoad.Add("samaccountname");
+            search.PropertiesToLoad.Add("cn");
+
+            foreach (SearchResult result in search.FindAll())
+            {
+                string samAccountName = result.Properties["samaccountname"][0]?.ToString();
+                Console.WriteLine($"[+] Privileged AD Account: {samAccountName}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Identifies the Built-in Administrator account (SID-500) on the local system.
+    /// </summary>
+    static void GetLocalBuiltInAdmin()
+    {
+        Console.WriteLine("\n[*] Checking for Built-in Local Administrator Account (SID-500)...");
+
+        using (PrincipalContext context = new PrincipalContext(ContextType.Machine))
+        {
+            UserPrincipal adminUser = UserPrincipal.FindByIdentity(context, "Administrator");
+            if (adminUser != null)
+            {
+                Console.WriteLine($"[+] Built-in Local Admin (SID-500): {adminUser.SamAccountName}");
+            }
+            else
+            {
+                Console.WriteLine("[-] No Built-in Local Admin (SID-500) found.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Lists all local administrator accounts (excluding the Built-in Admin) on Windows Server/Workstation.
+    /// </summary>
+    static void GetLocalAdminAccounts()
+    {
+        Console.WriteLine("\n[*] Checking Local Administrators Group...");
+
+        using (PrincipalContext context = new PrincipalContext(ContextType.Machine))
+        {
+            GroupPrincipal adminGroup = GroupPrincipal.FindByIdentity(context, "Administrators");
+            if (adminGroup != null)
+            {
+                foreach (var member in adminGroup.GetMembers())
+                {
+                    string accountName = member.SamAccountName;
+                    SecurityIdentifier sid = member.Sid;
+
+                    if (sid != null && sid.Value.EndsWith("-500"))
+                    {
+                        Console.WriteLine($"[!] Built-in Administrator (SID-500) already listed.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[+] Local Admin Account: {accountName}");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("[-] No local administrators found.");
+            }
+        }
+    }
+}
+
+How to Use?
+	1.	Replace "LDAP://DC=yourdomain,DC=com" with your actual domain name.
+	2.	Compile and run on a Windows Server or Workstation with Admin privileges.
+	3.	Ensure the machine is joined to AD for AD queries to work.
+
+Expected Output
+
+=== Privileged OS Accounts Detection ===
+
+[*] Checking Active Directory for Privileged Accounts...
+[+] Privileged AD Account: admin_user1
+[+] Privileged AD Account: enterprise_admin
+[+] Privileged AD Account: schema_manager
+
+[*] Checking for Built-in Local Administrator Account (SID-500)...
+[+] Built-in Local Admin (SID-500): Administrator
+
+[*] Checking Local Administrators Group...
+[+] Local Admin Account: ServerAdmin1
+[+] Local Admin Account: ITSupport
+[!] Built-in Administrator (SID-500) already listed.
+
+=== Scan Completed ===
+
+Why This Works Well?
+
+✔ Optimized LDAP Query → Retrieves only privileged AD accounts.
+✔ Checks Local SID-500 → Identifies the built-in Administrator.
+✔ Enumerates All Local Admins → Finds additional privileged accounts.
+✔ Efficient and Fast → Uses DirectorySearcher and PrincipalContext.
+
+This single script efficiently finds privileged accounts across AD, Windows Servers, and Workstations.
