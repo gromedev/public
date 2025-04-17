@@ -2,6 +2,7 @@
 # Install-Module -Name PSSQLite -Scope CurrentUser
 
 # Configuration
+# Replace "C:\path\to\database.db" with a valid path to your SQLite database file
 $databasePath = "C:\path\to\database.db"
 $defaultClientId = "d3590ed6-52b3-4102-aeff-aad2292ab01c"
 $defaultResource = "https://graph.microsoft.com"
@@ -251,7 +252,86 @@ function Start-DeviceCodePolling {
         param ($dbPath)
         # Re-import PSSQLite in the job context
         Import-Module PSSQLite
-        # Copy the Poll-DeviceCodes function into the job context
+
+        # Define Get-UserAgent
+        function Get-UserAgent {
+            $query = "SELECT value FROM settings WHERE setting = 'user_agent'"
+            $result = Invoke-SqliteQuery -DataSource $dbPath -Query $query
+            if ($result) {
+                return $result.value
+            }
+            return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+
+        # Define Save-AccessToken
+        function Save-AccessToken {
+            param ($accessToken, $description)
+
+            # Decode JWT (basic parsing since PowerShell lacks pyjwt)
+            $parts = $accessToken.Split('.')
+            $payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($parts[1] + ('=' * (4 - ($parts[1].Length % 4)))))
+            $decoded = ConvertFrom-Json $payload
+
+            $user = "unknown"
+            if ($decoded.idtyp -eq "user") {
+                $user = if ($decoded.unique_name) { $decoded.unique_name } elseif ($decoded.upn) { $decoded.upn } else { "unknown" }
+            } elseif ($decoded.idtyp -eq "app") {
+                $user = if ($decoded.app_displayname) { $decoded.app_displayname } elseif ($decoded.appid) { $decoded.appid } else { "unknown" }
+            } else {
+                $user = if ($decoded.unique_name) { $decoded.unique_name } `
+                        elseif ($decoded.upn) { $decoded.upn } `
+                        elseif ($decoded.app_displayname) { $decoded.app_displayname } `
+                        elseif ($decoded.oid) { $decoded.oid } `
+                        else { "unknown" }
+            }
+
+            $storedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            $issuedAt = if ($decoded.iat) { (Get-Date "1970-01-01").AddSeconds($decoded.iat).ToString("yyyy-MM-dd HH:mm:ss") } else { "unknown" }
+            $expiresAt = if ($decoded.exp) { (Get-Date "1970-01-01").AddSeconds($decoded.exp).ToString("yyyy-MM-dd HH:mm:ss") } else { "unknown" }
+            $resource = if ($decoded.aud) { $decoded.aud } else { "unknown" }
+
+            $query = @"
+INSERT INTO accesstokens (stored_at, issued_at, expires_at, description, user, resource, accesstoken)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+"@
+            $params = @($storedAt, $issuedAt, $expiresAt, $description, $user, $resource, $accessToken)
+            Invoke-SqliteQuery -DataSource $dbPath -Query $query -Parameters $params
+        }
+
+        # Define Save-RefreshToken
+        function Save-RefreshToken {
+            param ($refreshToken, $description, $user, $tenant, $resource, $foci)
+
+            function Is-ValidUUID {
+                param ($val)
+                try {
+                    [System.Guid]::Parse($val) | Out-Null
+                    return $true
+                } catch {
+                    return $false
+                }
+            }
+
+            function Get-TenantId {
+                param ($tenantDomain)
+                $headers = @{ "User-Agent" = Get-UserAgent }
+                $response = Invoke-RestMethod -Uri "https://login.microsoftonline.com/$tenantDomain/.well-known/openid-configuration" -Headers $headers -Method Get
+                $tenantId = $response.authorization_endpoint.Split('/')[3]
+                return $tenantId
+            }
+
+            $fociInt = if ($foci) { 1 } else { 0 }
+            $tenantId = if (Is-ValidUUID ($tenant -replace '[^\w-]','')) { ($tenant -replace '[^\w-]','') } else { Get-TenantId $tenant }
+
+            $query = @"
+INSERT INTO refreshtokens (stored_at, description, user, tenant_id, resource, foci, refreshtoken)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+"@
+            $params = @((Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $description, $user, $tenantId, $resource, $fociInt, $refreshToken)
+            Invoke-SqliteQuery -DataSource $dbPath -Query $query -Parameters $params
+        }
+
+        # Define Poll-DeviceCodes
         function Poll-DeviceCodes {
             while ($true) {
                 $query = "SELECT * FROM devicecodes WHERE status IN ('CREATED', 'POLLING')"
