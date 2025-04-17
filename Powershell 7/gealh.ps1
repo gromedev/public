@@ -1,9 +1,8 @@
-# Install PSSQLite module if not already installed
-# Install-Module -Name PSSQLite -Scope CurrentUser
+# Install SQLite module for PowerShell 7 compatibility
+# Install-Module -Name SQLite -Scope CurrentUser -Force
 
 # Configuration
-# Replace "C:\path\to\database.db" with a valid path to your SQLite database file
-$databasePath = "C:\path\to\database.db"
+$databasePath = "C:\temp\database.db"  # Ensure this directory exists and is writable
 $defaultClientId = "d3590ed6-52b3-4102-aeff-aad2292ab01c"
 $defaultResource = "https://graph.microsoft.com"
 $defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
@@ -11,7 +10,7 @@ $defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 # Helper Functions
 function Get-UserAgent {
     $query = "SELECT value FROM settings WHERE setting = 'user_agent'"
-    $result = Invoke-SqliteQuery -DataSource $databasePath -Query $query
+    $result = Invoke-SQLiteCommand -Connection $databasePath -Query $query
     if ($result) {
         return $result.value
     }
@@ -82,11 +81,11 @@ CREATE TABLE IF NOT EXISTS settings (
 "@
     $insertSchemaVersion = "INSERT OR IGNORE INTO settings (setting, value) VALUES ('schema_version', '4')"
 
-    Invoke-SqliteQuery -DataSource $databasePath -Query $createAccessTokens
-    Invoke-SqliteQuery -DataSource $databasePath -Query $createRefreshTokens
-    Invoke-SqliteQuery -DataSource $databasePath -Query $createDeviceCodes
-    Invoke-SqliteQuery -DataSource $databasePath -Query $createSettings
-    Invoke-SqliteQuery -DataSource $databasePath -Query $insertSchemaVersion
+    Invoke-SQLiteCommand -Connection $databasePath -Query $createAccessTokens
+    Invoke-SQLiteCommand -Connection $databasePath -Query $createRefreshTokens
+    Invoke-SQLiteCommand -Connection $databasePath -Query $createDeviceCodes
+    Invoke-SQLiteCommand -Connection $databasePath -Query $createSettings
+    Invoke-SQLiteCommand -Connection $databasePath -Query $insertSchemaVersion
 }
 
 function Save-AccessToken {
@@ -117,10 +116,18 @@ function Save-AccessToken {
 
     $query = @"
 INSERT INTO accesstokens (stored_at, issued_at, expires_at, description, user, resource, accesstoken)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+VALUES (@storedAt, @issuedAt, @expiresAt, @description, @user, @resource, @accesstoken)
 "@
-    $params = @($storedAt, $issuedAt, $expiresAt, $description, $user, $resource, $accessToken)
-    Invoke-SqliteQuery -DataSource $databasePath -Query $query -Parameters $params
+    $params = @{
+        "storedAt" = $storedAt
+        "issuedAt" = $issuedAt
+        "expiresAt" = $expiresAt
+        "description" = $description
+        "user" = $user
+        "resource" = $resource
+        "accesstoken" = $accessToken
+    }
+    Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
 }
 
 function Save-RefreshToken {
@@ -131,10 +138,18 @@ function Save-RefreshToken {
 
     $query = @"
 INSERT INTO refreshtokens (stored_at, description, user, tenant_id, resource, foci, refreshtoken)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+VALUES (@storedAt, @description, @user, @tenantId, @resource, @foci, @refreshtoken)
 "@
-    $params = @((Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $description, $user, $tenantId, $resource, $fociInt, $refreshToken)
-    Invoke-SqliteQuery -DataSource $databasePath -Query $query -Parameters $params
+    $params = @{
+        "storedAt" = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        "description" = $description
+        "user" = $user
+        "tenantId" = $tenantId
+        "resource" = $resource
+        "foci" = $fociInt
+        "refreshtoken" = $refreshToken
+    }
+    Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
 }
 
 function Generate-DeviceCode {
@@ -159,19 +174,19 @@ function Generate-DeviceCode {
 
     $query = @"
 INSERT INTO devicecodes (generated_at, expires_at, user_code, device_code, interval, client_id, status, last_poll)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (@generatedAt, @expiresAt, @userCode, @deviceCode, @interval, @clientId, @status, @lastPoll)
 "@
-    $params = @(
-        [int](Get-Date -UFormat %s),
-        [int](Get-Date -UFormat %s) + [int]$response.expires_in,
-        $response.user_code,
-        $response.device_code,
-        [int]$response.interval,
-        $clientId,
-        "CREATED",
-        0
-    )
-    Invoke-SqliteQuery -DataSource $databasePath -Query $query -Parameters $params
+    $params = @{
+        "generatedAt" = [int](Get-Date -UFormat %s)
+        "expiresAt" = [int](Get-Date -UFormat %s) + [int]$response.expires_in
+        "userCode" = $response.user_code
+        "deviceCode" = $response.device_code
+        "interval" = [int]$response.interval
+        "clientId" = $clientId
+        "status" = "CREATED"
+        "lastPoll" = 0
+    }
+    Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
 
     return $response.device_code
 }
@@ -179,7 +194,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 function Poll-DeviceCodes {
     while ($true) {
         $query = "SELECT * FROM devicecodes WHERE status IN ('CREATED', 'POLLING')"
-        $rows = Invoke-SqliteQuery -DataSource $databasePath -Query $query | Sort-Object last_poll
+        $rows = Invoke-SQLiteCommand -Connection $databasePath -Query $query | Sort-Object last_poll
 
         if (-not $rows) {
             break
@@ -188,7 +203,12 @@ function Poll-DeviceCodes {
         foreach ($row in $rows) {
             $currentTime = [int](Get-Date -UFormat %s)
             if ($currentTime -gt $row.expires_at) {
-                Invoke-SqliteQuery -DataSource $databasePath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("EXPIRED", $row.device_code)
+                $query = "UPDATE devicecodes SET status = @status WHERE device_code = @deviceCode"
+                $params = @{
+                    "status" = "EXPIRED"
+                    "deviceCode" = $row.device_code
+                }
+                Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
                 continue
             }
 
@@ -198,7 +218,12 @@ function Poll-DeviceCodes {
             }
 
             if ($row.status -eq "CREATED") {
-                Invoke-SqliteQuery -DataSource $databasePath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("POLLING", $row.device_code)
+                $query = "UPDATE devicecodes SET status = @status WHERE device_code = @deviceCode"
+                $params = @{
+                    "status" = "POLLING"
+                    "deviceCode" = $row.device_code
+                }
+                Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
             }
 
             $body = @{
@@ -211,7 +236,12 @@ function Poll-DeviceCodes {
 
             try {
                 $response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body
-                Invoke-SqliteQuery -DataSource $databasePath -Query "UPDATE devicecodes SET last_poll = ? WHERE device_code = ?" -Parameters @([int](Get-Date -UFormat %s), $row.device_code)
+                $query = "UPDATE devicecodes SET last_poll = @lastPoll WHERE device_code = @deviceCode"
+                $params = @{
+                    "lastPoll" = [int](Get-Date -UFormat %s)
+                    "deviceCode" = $row.device_code
+                }
+                Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
 
                 if ($response.access_token) {
                     $accessToken = $response.access_token
@@ -237,11 +267,21 @@ function Poll-DeviceCodes {
                                      -resource ($response.resource ? $response.resource : "unknown") `
                                      -foci ([int]($response.foci ? $response.foci : 0))
 
-                    Invoke-SqliteQuery -DataSource $databasePath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("SUCCESS", $row.device_code)
+                    $query = "UPDATE devicecodes SET status = @status WHERE device_code = @deviceCode"
+                    $params = @{
+                        "status" = "SUCCESS"
+                        "deviceCode" = $row.device_code
+                    }
+                    Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
                 }
             } catch {
                 # Handle errors (e.g., authorization_pending)
-                Invoke-SqliteQuery -DataSource $databasePath -Query "UPDATE devicecodes SET last_poll = ? WHERE device_code = ?" -Parameters @([int](Get-Date -UFormat %s), $row.device_code)
+                $query = "UPDATE devicecodes SET last_poll = @lastPoll WHERE device_code = @deviceCode"
+                $params = @{
+                    "lastPoll" = [int](Get-Date -UFormat %s)
+                    "deviceCode" = $row.device_code
+                }
+                Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
             }
         }
     }
@@ -250,13 +290,13 @@ function Poll-DeviceCodes {
 function Start-DeviceCodePolling {
     $job = Start-Job -ScriptBlock {
         param ($dbPath)
-        # Re-import PSSQLite in the job context
-        Import-Module PSSQLite
+        # Re-import SQLite in the job context
+        Import-Module SQLite
 
         # Define Get-UserAgent
         function Get-UserAgent {
             $query = "SELECT value FROM settings WHERE setting = 'user_agent'"
-            $result = Invoke-SqliteQuery -DataSource $dbPath -Query $query
+            $result = Invoke-SQLiteCommand -Connection $dbPath -Query $query
             if ($result) {
                 return $result.value
             }
@@ -292,10 +332,18 @@ function Start-DeviceCodePolling {
 
             $query = @"
 INSERT INTO accesstokens (stored_at, issued_at, expires_at, description, user, resource, accesstoken)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+VALUES (@storedAt, @issuedAt, @expiresAt, @description, @user, @resource, @accesstoken)
 "@
-            $params = @($storedAt, $issuedAt, $expiresAt, $description, $user, $resource, $accessToken)
-            Invoke-SqliteQuery -DataSource $dbPath -Query $query -Parameters $params
+            $params = @{
+                "storedAt" = $storedAt
+                "issuedAt" = $issuedAt
+                "expiresAt" = $expiresAt
+                "description" = $description
+                "user" = $user
+                "resource" = $resource
+                "accesstoken" = $accessToken
+            }
+            Invoke-SQLiteCommand -Connection $dbPath -Query $query -Parameters $params
         }
 
         # Define Save-RefreshToken
@@ -325,17 +373,25 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 
             $query = @"
 INSERT INTO refreshtokens (stored_at, description, user, tenant_id, resource, foci, refreshtoken)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+VALUES (@storedAt, @description, @user, @tenantId, @resource, @foci, @refreshtoken)
 "@
-            $params = @((Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $description, $user, $tenantId, $resource, $fociInt, $refreshToken)
-            Invoke-SqliteQuery -DataSource $dbPath -Query $query -Parameters $params
+            $params = @{
+                "storedAt" = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                "description" = $description
+                "user" = $user
+                "tenantId" = $tenantId
+                "resource" = $resource
+                "foci" = $fociInt
+                "refreshtoken" = $refreshToken
+            }
+            Invoke-SQLiteCommand -Connection $dbPath -Query $query -Parameters $params
         }
 
         # Define Poll-DeviceCodes
         function Poll-DeviceCodes {
             while ($true) {
                 $query = "SELECT * FROM devicecodes WHERE status IN ('CREATED', 'POLLING')"
-                $rows = Invoke-SqliteQuery -DataSource $dbPath -Query $query | Sort-Object last_poll
+                $rows = Invoke-SQLiteCommand -Connection $dbPath -Query $query | Sort-Object last_poll
 
                 if (-not $rows) {
                     break
@@ -344,7 +400,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
                 foreach ($row in $rows) {
                     $currentTime = [int](Get-Date -UFormat %s)
                     if ($currentTime -gt $row.expires_at) {
-                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("EXPIRED", $row.device_code)
+                        $query = "UPDATE devicecodes SET status = @status WHERE device_code = @deviceCode"
+                        $params = @{
+                            "status" = "EXPIRED"
+                            "deviceCode" = $row.device_code
+                        }
+                        Invoke-SQLiteCommand -Connection $dbPath -Query $query -Parameters $params
                         continue
                     }
 
@@ -354,7 +415,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
                     }
 
                     if ($row.status -eq "CREATED") {
-                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("POLLING", $row.device_code)
+                        $query = "UPDATE devicecodes SET status = @status WHERE device_code = @deviceCode"
+                        $params = @{
+                            "status" = "POLLING"
+                            "deviceCode" = $row.device_code
+                        }
+                        Invoke-SQLiteCommand -Connection $dbPath -Query $query -Parameters $params
                     }
 
                     $body = @{
@@ -367,7 +433,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 
                     try {
                         $response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body
-                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET last_poll = ? WHERE device_code = ?" -Parameters @([int](Get-Date -UFormat %s), $row.device_code)
+                        $query = "UPDATE devicecodes SET last_poll = @lastPoll WHERE device_code = @deviceCode"
+                        $params = @{
+                            "lastPoll" = [int](Get-Date -UFormat %s)
+                            "deviceCode" = $row.device_code
+                        }
+                        Invoke-SQLiteCommand -Connection $dbPath -Query $query -Parameters $params
 
                         if ($response.access_token) {
                             $accessToken = $response.access_token
@@ -393,11 +464,21 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
                                              -resource ($response.resource ? $response.resource : "unknown") `
                                              -foci ([int]($response.foci ? $response.foci : 0))
 
-                            Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("SUCCESS", $row.device_code)
+                            $query = "UPDATE devicecodes SET status = @status WHERE device_code = @deviceCode"
+                            $params = @{
+                                "status" = "SUCCESS"
+                                "deviceCode" = $row.device_code
+                            }
+                            Invoke-SQLiteCommand -Connection $dbPath -Query $query -Parameters $params
                         }
                     } catch {
                         # Handle errors (e.g., authorization_pending)
-                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET last_poll = ? WHERE device_code = ?" -Parameters @([int](Get-Date -UFormat %s), $row.device_code)
+                        $query = "UPDATE devicecodes SET last_poll = @lastPoll WHERE device_code = @deviceCode"
+                        $params = @{
+                            "lastPoll" = [int](Get-Date -UFormat %s)
+                            "deviceCode" = $row.device_code
+                        }
+                        Invoke-SQLiteCommand -Connection $dbPath -Query $query -Parameters $params
                     }
                 }
             }
@@ -415,8 +496,11 @@ function Invoke-DeviceCodeFlow {
     )
 
     $deviceCode = Generate-DeviceCode -resource $resource -clientId $clientId -ngcmfa:$ngcmfa
-    $query = "SELECT user_code FROM devicecodes WHERE device_code = ?"
-    $userCode = (Invoke-SqliteQuery -DataSource $databasePath -Query $query -Parameters @($deviceCode)).user_code
+    $query = "SELECT user_code FROM devicecodes WHERE device_code = @deviceCode"
+    $params = @{
+        "deviceCode" = $deviceCode
+    }
+    $userCode = (Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params).user_code
 
     Start-DeviceCodePolling
     return $userCode
@@ -432,8 +516,11 @@ function Refresh-ToAccessToken {
         $apiVersion = 1
     )
 
-    $query = "SELECT refreshtoken, tenant_id, resource FROM refreshtokens WHERE id = ?"
-    $tokenData = Invoke-SqliteQuery -DataSource $databasePath -Query $query -Parameters @($refreshTokenId)
+    $query = "SELECT refreshtoken, tenant_id, resource FROM refreshtokens WHERE id = @id"
+    $params = @{
+        "id" = $refreshTokenId
+    }
+    $tokenData = Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params
     if (-not $tokenData) {
         throw "Refresh token with ID $refreshTokenId not found."
     }
@@ -463,8 +550,11 @@ function Refresh-ToAccessToken {
         $accessToken = $response.access_token
         Save-AccessToken -accessToken $accessToken -description "Created using refresh token $refreshTokenId"
 
-        $query = "SELECT id FROM accesstokens WHERE accesstoken = ?"
-        $accessTokenId = (Invoke-SqliteQuery -DataSource $databasePath -Query $query -Parameters @($accessToken)).id
+        $query = "SELECT id FROM accesstokens WHERE accesstoken = @accesstoken"
+        $params = @{
+            "accesstoken" = $accessToken
+        }
+        $accessTokenId = (Invoke-SQLiteCommand -Connection $databasePath -Query $query -Parameters $params).id
 
         if ($storeRefreshToken) {
             $parts = $accessToken.Split('.')
