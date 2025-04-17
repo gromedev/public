@@ -253,8 +253,74 @@ function Start-DeviceCodePolling {
         Import-Module PSSQLite
         # Copy the Poll-DeviceCodes function into the job context
         function Poll-DeviceCodes {
-            # [Paste the Poll-DeviceCodes function here]
-            # ... (same as above) ...
+            while ($true) {
+                $query = "SELECT * FROM devicecodes WHERE status IN ('CREATED', 'POLLING')"
+                $rows = Invoke-SqliteQuery -DataSource $dbPath -Query $query | Sort-Object last_poll
+
+                if (-not $rows) {
+                    break
+                }
+
+                foreach ($row in $rows) {
+                    $currentTime = [int](Get-Date -UFormat %s)
+                    if ($currentTime -gt $row.expires_at) {
+                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("EXPIRED", $row.device_code)
+                        continue
+                    }
+
+                    $nextPoll = $row.last_poll + $row.interval
+                    if ($currentTime -lt $nextPoll) {
+                        Start-Sleep -Seconds ($nextPoll - $currentTime)
+                    }
+
+                    if ($row.status -eq "CREATED") {
+                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("POLLING", $row.device_code)
+                    }
+
+                    $body = @{
+                        client_id  = $row.client_id
+                        grant_type = "urn:ietf:params:oauth:grant-type:device_code"
+                        code       = $row.device_code
+                    }
+                    $url = "https://login.microsoftonline.com/Common/oauth2/token?api-version=1.0"
+                    $headers = @{ "User-Agent" = Get-UserAgent }
+
+                    try {
+                        $response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body
+                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET last_poll = ? WHERE device_code = ?" -Parameters @([int](Get-Date -UFormat %s), $row.device_code)
+
+                        if ($response.access_token) {
+                            $accessToken = $response.access_token
+                            $userCode = $row.user_code
+                            Save-AccessToken -accessToken $accessToken -description "Created using device code auth ($userCode)"
+
+                            # Decode access token
+                            $parts = $accessToken.Split('.')
+                            $payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($parts[1] + ('=' * (4 - ($parts[1].Length % 4)))))
+                            $decoded = ConvertFrom-Json $payload
+
+                            $user = "unknown"
+                            if ($decoded.idtyp -eq "user") {
+                                $user = if ($decoded.unique_name) { $decoded.unique_name } elseif ($decoded.upn) { $decoded.upn } else { "unknown" }
+                            } elseif ($decoded.idtyp -eq "app") {
+                                $user = if ($decoded.app_displayname) { $decoded.app_displayname } elseif ($decoded.appid) { $decoded.appid } else { "unknown" }
+                            }
+
+                            Save-RefreshToken -refreshToken $response.refresh_token `
+                                             -description "Created using device code auth ($userCode)" `
+                                             -user $user `
+                                             -tenant ($decoded.tid ? $decoded.tid : "unknown") `
+                                             -resource ($response.resource ? $response.resource : "unknown") `
+                                             -foci ([int]($response.foci ? $response.foci : 0))
+
+                            Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET status = ? WHERE device_code = ?" -Parameters @("SUCCESS", $row.device_code)
+                        }
+                    } catch {
+                        # Handle errors (e.g., authorization_pending)
+                        Invoke-SqliteQuery -DataSource $dbPath -Query "UPDATE devicecodes SET last_poll = ? WHERE device_code = ?" -Parameters @([int](Get-Date -UFormat %s), $row.device_code)
+                    }
+                }
+            }
         }
         Poll-DeviceCodes
     } -ArgumentList $databasePath
