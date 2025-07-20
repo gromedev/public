@@ -1,0 +1,216 @@
+function Remove-ParallelsARMSignatures {
+    Write-Host "=== Removing Parallels ARM VM Signatures ===" -ForegroundColor Green
+    
+    # Check if running as administrator
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+        Write-Host "This script requires administrator privileges" -ForegroundColor Red
+        Write-Host "Right-click PowerShell and 'Run as Administrator'" -ForegroundColor Yellow
+        return
+    }
+    
+    # Create backup location
+    $backupPath = "C:\VMEvasion_Backup"
+    if (-not (Test-Path $backupPath)) {
+        New-Item $backupPath -ItemType Directory -Force
+        Write-Host "Created backup directory: $backupPath" -ForegroundColor Green
+    }
+    
+    Write-Host "`n=== Phase 1: Stopping Parallels Services ===" -ForegroundColor Yellow
+    
+    # Stop Parallels services
+    $parallelsServices = @(
+        "Parallels Coherence Service",
+        "Parallels Tools Service"
+    )
+    
+    foreach ($service in $parallelsServices) {
+        try {
+            $svc = Get-Service -Name "*$service*" -ErrorAction SilentlyContinue
+            if ($svc) {
+                Write-Host "Stopping service: $($svc.Name)" -ForegroundColor Yellow
+                Stop-Service $svc.Name -Force
+                Set-Service $svc.Name -StartupType Disabled
+                Write-Host "  ✓ Stopped and disabled: $($svc.Name)" -ForegroundColor Green
+            }
+        } catch {
+            Write-Host "  ✗ Failed to stop: $service" -ForegroundColor Red
+        }
+    }
+    
+    Write-Host "`n=== Phase 2: Registry Modifications ===" -ForegroundColor Yellow
+    
+    # Remove Parallels registry keys
+    $parallelsRegKeys = @(
+        "HKLM:\SOFTWARE\Parallels",
+        "HKLM:\SYSTEM\CurrentControlSet\Services\prl_*"
+    )
+    
+    foreach ($keyPattern in $parallelsRegKeys) {
+        if ($keyPattern -like "*prl_*") {
+            # Handle wildcard pattern
+            $parentPath = "HKLM:\SYSTEM\CurrentControlSet\Services"
+            $keys = Get-ChildItem $parentPath | Where-Object {$_.Name -match "prl_"}
+            foreach ($key in $keys) {
+                try {
+                    Write-Host "Removing service key: $($key.Name)" -ForegroundColor Yellow
+                    Remove-Item $key.PSPath -Recurse -Force
+                    Write-Host "  ✓ Removed: $($key.Name)" -ForegroundColor Green
+                } catch {
+                    Write-Host "  ✗ Failed to remove: $($key.Name)" -ForegroundColor Red
+                }
+            }
+        } else {
+            if (Test-Path $keyPattern) {
+                try {
+                    # Backup first
+                    $backupFile = "$backupPath\$(Split-Path $keyPattern -Leaf).reg"
+                    reg export $keyPattern.Replace("HKLM:\", "HKEY_LOCAL_MACHINE\") $backupFile /y
+                    
+                    Remove-Item $keyPattern -Recurse -Force
+                    Write-Host "  ✓ Removed: $keyPattern" -ForegroundColor Green
+                } catch {
+                    Write-Host "  ✗ Failed to remove: $keyPattern" -ForegroundColor Red
+                }
+            }
+        }
+    }
+    
+    Write-Host "`n=== Phase 3: Hardware Information Spoofing ===" -ForegroundColor Yellow
+    
+    # Modify system manufacturer information
+    $systemRegPaths = @{
+        "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" = @{
+            "SystemManufacturer" = "Microsoft Corporation"
+            "SystemProductName" = "Surface Pro 9"
+            "SystemFamily" = "Surface"
+            "BIOSVendor" = "Microsoft Corporation"
+            "BIOSVersion" = "1.14.3684.0"
+            "BIOSReleaseDate" = "10/25/2023"
+        }
+        "HKLM:\HARDWARE\DESCRIPTION\System\BIOS" = @{
+            "SystemManufacturer" = "Microsoft Corporation"
+            "SystemProductName" = "Surface Pro 9"
+            "BIOSVendor" = "Microsoft Corporation"
+            "BIOSVersion" = "UEFI: 1.14.3684.0"
+        }
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" = @{
+            "Manufacturer" = "Microsoft Corporation"
+            "Model" = "Surface Pro 9"
+            "SupportURL" = "https://support.microsoft.com"
+        }
+    }
+    
+    foreach ($regPath in $systemRegPaths.GetEnumerator()) {
+        if (-not (Test-Path $regPath.Key)) {
+            New-Item $regPath.Key -Force | Out-Null
+        }
+        
+        foreach ($value in $regPath.Value.GetEnumerator()) {
+            try {
+                Set-ItemProperty $regPath.Key -Name $value.Key -Value $value.Value -Force
+                Write-Host "  ✓ Set $($regPath.Key)\$($value.Key) = $($value.Value)" -ForegroundColor Green
+            } catch {
+                Write-Host "  ✗ Failed to set $($value.Key)" -ForegroundColor Red
+            }
+        }
+    }
+    
+    Write-Host "`n=== Phase 4: Network Adapter MAC Spoofing ===" -ForegroundColor Yellow
+    
+    # Generate Microsoft Surface-like MAC address
+    $surfaceMacPrefixes = @("F4:39:09", "00:50:F2", "AC:81:12")
+    $newMacPrefix = $surfaceMacPrefixes | Get-Random
+    $newMacSuffix = "{0:X2}:{1:X2}:{2:X2}" -f (Get-Random -Max 255), (Get-Random -Max 255), (Get-Random -Max 255)
+    $newMac = "$newMacPrefix:$newMacSuffix"
+    
+    Write-Host "Changing MAC from Parallels signature to: $newMac" -ForegroundColor Cyan
+    
+    # Find network adapter registry entries
+    $adapterPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
+    $adapterKeys = Get-ChildItem $adapterPath | Where-Object {
+        $driverDesc = Get-ItemProperty $_.PSPath -Name "DriverDesc" -ErrorAction SilentlyContinue
+        $driverDesc.DriverDesc -match "Parallels.*Ethernet"
+    }
+    
+    foreach ($key in $adapterKeys) {
+        try {
+            # Backup original MAC
+            $originalMac = Get-ItemProperty $key.PSPath -Name "NetworkAddress" -ErrorAction SilentlyContinue
+            if ($originalMac) {
+                "$($key.PSChildName),$($originalMac.NetworkAddress)" | Out-File "$backupPath\original_macs.txt" -Append
+            }
+            
+            # Set new MAC
+            Set-ItemProperty $key.PSPath -Name "NetworkAddress" -Value ($newMac -replace ":", "") -Force
+            
+            # Also change the driver description
+            Set-ItemProperty $key.PSPath -Name "DriverDesc" -Value "Microsoft Wi-Fi Direct Virtual Adapter" -Force
+            
+            Write-Host "  ✓ MAC address changed for adapter" -ForegroundColor Green
+        } catch {
+            Write-Host "  ✗ Failed to change MAC address" -ForegroundColor Red
+        }
+    }
+    
+    Write-Host "`n=== Phase 5: ARM Architecture Handling ===" -ForegroundColor Yellow
+    
+    # Since this is ARM, we need to make it look like a legitimate ARM device (Surface Pro X)
+    $processorPath = "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+    if (Test-Path $processorPath) {
+        Set-ItemProperty $processorPath -Name "ProcessorNameString" -Value "Microsoft SQ3 @ 3.00 GHz" -Force
+        Set-ItemProperty $processorPath -Name "VendorIdentifier" -Value "Qualcomm Technologies Inc" -Force
+        Set-ItemProperty $processorPath -Name "Identifier" -Value "ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc" -Force
+        Write-Host "  ✓ Modified processor identification for ARM" -ForegroundColor Green
+    }
+    
+    Write-Host "`n=== Phase 6: Device Manager Entries ===" -ForegroundColor Yellow
+    Write-Host "NOTE: Some hardware entries require device driver modifications" -ForegroundColor Cyan
+    Write-Host "The following Parallels devices will still be visible:" -ForegroundColor Cyan
+    Write-Host "  - Display Adapter (can be renamed via Device Manager)" -ForegroundColor Cyan
+    Write-Host "  - Audio devices (less suspicious)" -ForegroundColor Cyan
+    Write-Host "  - Some USB devices (common in enterprise)" -ForegroundColor Cyan
+    
+    Write-Host "`n=== Phase 7: Creating Realistic System Artifacts ===" -ForegroundColor Yellow
+    
+    # Create realistic installation date
+    $installDate = (Get-Date).AddDays(-90)  # 3 months ago
+    $installTimestamp = [int]([DateTimeOffset]$installDate).ToUnixTimeSeconds()
+    Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "InstallDate" -Value $installTimestamp -Force
+    Write-Host "  ✓ Set realistic installation date: $installDate" -ForegroundColor Green
+    
+    # Create fake user artifacts
+    $userArtifacts = @(
+        "$env:USERPROFILE\Documents\Q4_Budget_Analysis.xlsx",
+        "$env:USERPROFILE\Documents\Team_Meeting_Notes.docx",
+        "$env:USERPROFILE\Downloads\Teams_windows_arm64.exe",
+        "$env:USERPROFILE\Desktop\Company_Policies.pdf"
+    )
+    
+    foreach ($artifact in $userArtifacts) {
+        if (-not (Test-Path $artifact)) {
+            "Placeholder content created $(Get-Date -Format 'yyyy-MM-dd HH:mm')" | Out-File $artifact
+            # Set realistic file times
+            $fileDate = (Get-Date).AddDays(-(Get-Random -Minimum 5 -Maximum 45))
+            (Get-Item $artifact).CreationTime = $fileDate
+            (Get-Item $artifact).LastWriteTime = $fileDate
+        }
+    }
+    Write-Host "  ✓ Created realistic user artifacts" -ForegroundColor Green
+    
+    Write-Host "`n=== Evasion Complete ===" -ForegroundColor Green
+    Write-Host "Parallels signatures removed/modified" -ForegroundColor Green
+    Write-Host "Hardware information spoofed as Surface Pro 9" -ForegroundColor Green  
+    Write-Host "MAC address changed" -ForegroundColor Green
+    Write-Host "System artifacts created" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "IMPORTANT NEXT STEPS:" -ForegroundColor Yellow
+    Write-Host "1. Restart the VM for all changes to take effect" -ForegroundColor White
+    Write-Host "2. After restart, disable/restart network adapter to apply MAC change" -ForegroundColor White
+    Write-Host "3. Run Get-VMDetectionSignatures again to verify" -ForegroundColor White
+    Write-Host "4. Uninstall Parallels Tools from Programs & Features for complete removal" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Backup location: $backupPath" -ForegroundColor Cyan
+}
+
+# Execute the evasion
+Remove-ParallelsARMSignatures
