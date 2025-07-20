@@ -96,5 +96,47 @@ function Get-VMDetectionSignatures {
     }
 }
 
+function Fix-SystemIdentification {
+    Write-Host "=== Simple System ID Fix ===" -ForegroundColor Green
+    
+    # Check admin privileges
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+        Write-Host "❌ Run as Administrator" -ForegroundColor Red
+        return
+    }
+    
+    Write-Host "Changing system identification to appear as physical ARM PC..." -ForegroundColor Yellow
+    
+    # Core system identification changes
+    try {
+        # System information
+        Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "SystemManufacturer" -Value "Microsoft Corporation" -Force
+        Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "SystemProductName" -Value "Surface Pro 9" -Force
+        Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "BIOSVendor" -Value "Microsoft Corporation" -Force
+        Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "BIOSVersion" -Value "1.14.3684.0" -Force
+        
+        # BIOS information  
+        Set-ItemProperty "HKLM:\HARDWARE\DESCRIPTION\System\BIOS" -Name "SystemManufacturer" -Value "Microsoft Corporation" -Force
+        Set-ItemProperty "HKLM:\HARDWARE\DESCRIPTION\System\BIOS" -Name "SystemProductName" -Value "Surface Pro 9" -Force
+        Set-ItemProperty "HKLM:\HARDWARE\DESCRIPTION\System\BIOS" -Name "BIOSVendor" -Value "Microsoft Corporation" -Force
+        Set-ItemProperty "HKLM:\HARDWARE\DESCRIPTION\System\BIOS" -Name "BIOSVersion" -Value "UEFI: 1.14.3684.0" -Force
+        
+        # Computer system info
+        Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" -Name "Manufacturer" -Value "Microsoft Corporation" -Force
+        Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" -Name "Model" -Value "Surface Pro 9" -Force
+        
+        Write-Host "✅ System identification changed" -ForegroundColor Green
+        Write-Host "✅ Will appear as: Microsoft Surface Pro 9" -ForegroundColor Green
+        Write-Host "⚠️  Reboot required for changes to take effect" -ForegroundColor Yellow
+        
+    } catch {
+        Write-Host "❌ Error: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# Run it
+#Fix-SystemIdentification
+
 # Run the analysis
 Get-VMDetectionSignatures
+
