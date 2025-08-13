@@ -1,0 +1,28 @@
+<description>
+I am using Power BI  
+I have a table called computers  
+it contains these columns:  
+computers.Properties.name —> computer name  
+computers.LocalGroups.Results.ObjectIdentifier —> User SIDs  
+computers.LocalGroups.Names —> local group names  
+
+I have another table called ADUsers  
+it contains these columns:  
+UserIdentifier —> User Names  
+ObjectSid —> User SIDs  
+
+Both tables have SIDs that correspond to users
+The ADUsers table has user names that correspond to SIDs
+
+</description>
+
+<complication>
+Each table has unique values and/or null values that the other table is missing. 
+Any DAX code must take into account unique and/or null values in order to establish the relationship
+</complication>
+
+<objective>
+I want to make a relationship between these two tables so that I can see what User Names are in which Local Groups on what computers  
+
+I then want to make a visualization that will show which groups, on which computers, have which users
+</objective>
