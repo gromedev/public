@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-WORKING script with recursive unlimited depth (up to 50 levels) - HashSet optimization
+WORKING script with recursive unlimited depth (up to 50 levels) - HashSet + Connection Refresh optimizations
 #>
 
 # Import existing modules
@@ -25,6 +25,14 @@ $script:maxDepthFound = 0
 $outputPath = “C:\temp\nested.json”
 if (-not (Test-Path “C:\temp”)) {
 New-Item -ItemType Directory -Path “C:\temp” -Force | Out-Null
+}
+
+# Connection refresh function to prevent LDAP connection degradation
+
+function Refresh-LDAPConnection {
+if ($script:connection) { $script:connection.Dispose() }
+$script:connection = New-LDAPConnection -Config $config.ActiveDirectory
+Write-Host “  → Refreshed LDAP connection” -ForegroundColor Yellow
 }
 
 # Recursive function using HashSet instead of hashtable
@@ -61,7 +69,7 @@ try {
         -Filter "(&(objectCategory=group)(memberof=$ParentGroupDN))" `
         -Attributes @("distinguishedName", "name")
 
-    $nestedResponse = $connection.SendRequest($nestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+    $nestedResponse = $script:connection.SendRequest($nestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
 
     foreach ($nestedEntry in $nestedResponse.Entries) {
         $nestedAttrs = $nestedEntry.Attributes
@@ -103,7 +111,7 @@ return $nestedGroups
 Set-Content -Path $outputPath -Value “[” -Encoding UTF8
 
 try {
-$connection = New-LDAPConnection -Config $config.ActiveDirectory
+$script:connection = New-LDAPConnection -Config $config.ActiveDirectory
 
 ```
 Write-Host "Starting unlimited depth collection (up to 50 levels)..." -ForegroundColor Yellow
@@ -123,6 +131,11 @@ $firstGroup = $true
 do {
     $pageNumber++
     
+    # Refresh LDAP connection every 20 pages to prevent degradation
+    if ($pageNumber % 20 -eq 0) {
+        Refresh-LDAPConnection
+    }
+    
     # EXACT SAME memory reporting
     if ($pageNumber % 10 -eq 0) {
         $currentMemory = (Get-Process -Id $pid).WorkingSet64 / 1GB
@@ -131,7 +144,7 @@ do {
 
     $searchRequest.Controls.Clear()
     $searchRequest.Controls.Add($pagingControl)
-    $response = $connection.SendRequest($searchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+    $response = $script:connection.SendRequest($searchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
 
     if ($null -eq $response -or $response.Entries.Count -eq 0) {
         break
@@ -216,7 +229,7 @@ throw
 ```
 
 } finally {
-if ($connection) { $connection.Dispose() }
+if ($script:connection) { $script:connection.Dispose() }
 
 ```
 # EXACT SAME cleanup
