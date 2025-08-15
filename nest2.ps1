@@ -153,7 +153,10 @@ do {
                                             $level4Attrs = $level4Entry.Attributes
                                             $level4GroupName = if ($level4Attrs["name"]) { $level4Attrs["name"][0] } else { "Unknown" }
 
-                                            $level4Groups += @{ Name = $level4GroupName }
+                                            $level4Groups += @{ 
+                                                Name = $level4GroupName
+                                                Depth = 4
+                                            }
                                             $totalRelationships++
 
                                             if ($totalRelationships -le 25) {
@@ -168,6 +171,7 @@ do {
                                     # Build level 3 entry with proper nesting
                                     $level3Groups += @{
                                         Name = $level3GroupName
+                                        Depth = 3
                                         NestedGroups = $level4Groups
                                     }
                                 }
@@ -179,6 +183,7 @@ do {
                             # Build level 2 entry with proper nesting
                             $level2Groups += @{
                                 Name = $subNestedGroupName
+                                Depth = 2
                                 NestedGroups = $level3Groups
                             }
                         }
@@ -190,6 +195,7 @@ do {
                     # Build level 1 entry with proper nesting (FIXED from original)
                     $nestedGroups += @{
                         Name = $nestedGroupName
+                        Depth = 1
                         NestedGroups = $level2Groups
                     }
                 }
@@ -198,12 +204,13 @@ do {
                 if ($nestedGroups.Count -gt 0) {
                     $parentGroupEntry = @{
                         Name = $parentGroupName
+                        Depth = 0
                         NestedGroups = $nestedGroups
                     }
                     
-                    # Write immediately - EXACT SAME
+                    # Write immediately - PRETTY PRINTED for readability
                     $comma = if ($firstGroup) { "" } else { "," }
-                    $jsonEntry = $comma + ($parentGroupEntry | ConvertTo-Json -Depth 10 -Compress)
+                    $jsonEntry = $comma + ($parentGroupEntry | ConvertTo-Json -Depth 10)
                     Add-Content -Path $outputPath -Value $jsonEntry -Encoding UTF8
                     $firstGroup = $false
                 }
