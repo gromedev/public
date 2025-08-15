@@ -1,17 +1,17 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-WORKING script with recursive unlimited depth (up to 50 levels)
+WORKING script with recursive unlimited depth (up to 50 levels) - HashSet optimization
 #>
 
 # Import existing modules
 
-Import-Module (Join-Path $PSScriptRoot “....\Modules\AD.Functions.psm1”) -Force
-Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”) -Force
+Import-Module (Join-Path $PSScriptRoot “….\Modules\AD.Functions.psm1”) -Force
+Import-Module (Join-Path $PSScriptRoot “….\Modules\Common.Functions.psm1”) -Force
 
 # Get configuration
 
-$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
+$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “….\Modules\giam-config.json”) -Force
 
 Write-Host “UNLIMITED DEPTH RECURSIVE: Up to 50 levels deep” -ForegroundColor Cyan
 Write-Host “===============================================” -ForegroundColor Cyan
@@ -27,7 +27,7 @@ if (-not (Test-Path “C:\temp”)) {
 New-Item -ItemType Directory -Path “C:\temp” -Force | Out-Null
 }
 
-# Recursive function using EXACT same working logic
+# Recursive function using HashSet instead of hashtable
 
 function Get-NestedGroupsRecursive {
 param(
@@ -35,17 +35,17 @@ param(
 [string]$ParentGroupName,
 [int]$CurrentDepth,
 [int]$MaxDepth = 50,
-[hashtable]$VisitedGroups = @{}
+[System.Collections.Generic.HashSet[string]]$VisitedGroups = [System.Collections.Generic.HashSet[string]]::new()
 )
 
 ```
 # Prevent infinite loops and excessive depth
-if ($CurrentDepth -gt $MaxDepth -or $VisitedGroups.ContainsKey($ParentGroupDN)) {
+if ($CurrentDepth -gt $MaxDepth -or $VisitedGroups.Contains($ParentGroupDN)) {
     return @()
 }
 
 # Track visited groups for this path
-$VisitedGroups[$ParentGroupDN] = $true
+$VisitedGroups.Add($ParentGroupDN) | Out-Null
 
 # Update max depth found
 if ($CurrentDepth -gt $script:maxDepthFound) {
@@ -76,8 +76,8 @@ try {
             Write-Host "$indent✓ Depth $CurrentDepth`: '$ParentGroupName' → '$nestedGroupName'" -ForegroundColor Green
         }
         
-        # Recursively get deeper levels (with clean visited groups for each branch)
-        $deeperNestedGroups = Get-NestedGroupsRecursive -ParentGroupDN $nestedGroupDN -ParentGroupName $nestedGroupName -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth -VisitedGroups ($VisitedGroups.Clone())
+        # Recursively get deeper levels (with HashSet copy instead of hashtable clone)
+        $deeperNestedGroups = Get-NestedGroupsRecursive -ParentGroupDN $nestedGroupDN -ParentGroupName $nestedGroupName -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth -VisitedGroups ([System.Collections.Generic.HashSet[string]]::new($VisitedGroups))
         
         # Build this nested group entry
         $nestedGroupEntry = @{
