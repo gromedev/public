@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Fixed POC - Count groups and nested groups properly
+Use EXACT same logic as debug script that worked, just count more
 #>
 
 # Import existing modules
@@ -13,32 +13,35 @@ Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”)
 
 $config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
 
-Write-Host “FIXED: Counting AD Groups and Nested Groups” -ForegroundColor Cyan
-Write-Host “===========================================” -ForegroundColor Cyan
+Write-Host “EXACT DEBUG LOGIC: Using proven approach” -ForegroundColor Cyan
+Write-Host “=======================================” -ForegroundColor Cyan
 
 $allGroups = @{}
-$allGroupMembers = @{}
+$totalNestedRelationships = 0
+$groupsWithNestedGroups = 0
+$sampleRelationships = @()
 
 try {
-# Create LDAP connection
-Write-Host “Phase 1: Collecting ALL groups and their members…” -ForegroundColor Yellow
 $connection = New-LDAPConnection -Config $config.ActiveDirectory
 
 ```
-# Single pass - collect everything at once
+Write-Host "Step 1: Collecting ALL groups (same as debug script)..." -ForegroundColor Yellow
+
+# EXACT same collection logic as debug script
 $searchRequest = New-LDAPSearchRequest `
     -SearchBase $config.ActiveDirectory.OrganizationalUnit `
     -Filter "(objectClass=group)" `
-    -Attributes @("distinguishedName", "name", "member")
+    -Attributes @("distinguishedName", "name")
 
-$pageSize = $config.ActiveDirectory.PageSize
-$pagingControl = New-Object System.DirectoryServices.Protocols.PageResultRequestControl($pageSize)
+$pagingControl = New-Object System.DirectoryServices.Protocols.PageResultRequestControl($config.ActiveDirectory.PageSize)
 $pageNumber = 0
-$totalGroups = 0
 
 do {
     $pageNumber++
-    Write-Host "Processing page $pageNumber..."
+    if ($pageNumber % 50 -eq 0) {
+        $currentMemory = (Get-Process -Id $pid).WorkingSet64 / 1GB
+        Write-Host "  Page $pageNumber... Groups: $($allGroups.Count), Memory: $([Math]::Round($currentMemory,1))GB"
+    }
 
     $searchRequest.Controls.Clear()
     $searchRequest.Controls.Add($pagingControl)
@@ -53,89 +56,105 @@ do {
         $groupDN = $attrs["distinguishedName"][0]
         $groupName = if ($attrs["name"]) { $attrs["name"][0] } else { "Unknown" }
         
-        $totalGroups++
-        $allGroups[$groupDN] = $groupName
-        
-        # Store all members for this group
-        $members = @()
-        if ($attrs["member"]) {
-            foreach ($memberDN in $attrs["member"]) {
-                $members += $memberDN
-            }
-        }
-        $allGroupMembers[$groupDN] = $members
+        $allGroups[$groupDN] = $groupName  # EXACT same as debug script
     }
 
     $cookie = ($response.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
     $pagingControl.Cookie = $cookie
 
-    if ($pageNumber % 20 -eq 0) {
-        Write-Host "  Progress: $totalGroups groups collected..."
-    }
-
 } while ($null -ne $cookie -and $cookie.Length -ne 0)
 
-Write-Host "Phase 2: Analyzing group-to-group relationships..." -ForegroundColor Yellow
+Write-Host "Step 2: Analyzing groups with members (same as debug script)..." -ForegroundColor Yellow
+Write-Host "Total groups collected: $($allGroups.Count)" -ForegroundColor Cyan
 
-$groupsWithNestedGroups = 0
-$totalNestedRelationships = 0
-$sampleRelationships = @()
+# EXACT same analysis logic as debug script
+$searchRequest2 = New-LDAPSearchRequest `
+    -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+    -Filter "(&(objectClass=group)(member=*))" `
+    -Attributes @("distinguishedName", "name", "member")
 
-foreach ($groupDN in $allGroups.Keys) {
-    $groupName = $allGroups[$groupDN]
-    $members = $allGroupMembers[$groupDN]
-    
-    if ($members.Count -gt 0) {
-        $nestedGroupsInThisGroup = 0
+$pagingControl2 = New-Object System.DirectoryServices.Protocols.PageResultRequestControl(100)
+$pageNumber2 = 0
+$groupsProcessed = 0
+
+do {
+    $pageNumber2++
+    if ($pageNumber2 % 50 -eq 0) {
+        Write-Host "  Analysis page $pageNumber2... Found $totalNestedRelationships relationships"
+    }
+
+    $searchRequest2.Controls.Clear()
+    $searchRequest2.Controls.Add($pagingControl2)
+    $response2 = $connection.SendRequest($searchRequest2) -as [System.DirectoryServices.Protocols.SearchResponse]
+
+    if ($null -eq $response2 -or $response2.Entries.Count -eq 0) {
+        break
+    }
+
+    foreach ($entry in $response2.Entries) {
+        $attrs = $entry.Attributes
+        $groupDN = $attrs["distinguishedName"][0]
+        $groupName = if ($attrs["name"]) { $attrs["name"][0] } else { "Unknown" }
         
-        foreach ($memberDN in $members) {
-            # Check if this member is actually a group
-            if ($allGroups.ContainsKey($memberDN)) {
-                $nestedGroupName = $allGroups[$memberDN]
-                $nestedGroupsInThisGroup++
-                $totalNestedRelationships++
-                
-                # Collect samples
-                if ($sampleRelationships.Count -lt 20) {
-                    $sampleRelationships += @{
-                        ParentGroup = $groupName
-                        NestedGroup = $nestedGroupName
+        $groupsProcessed++
+        $nestedGroupsInThisGroup = 0
+
+        if ($attrs["member"]) {
+            foreach ($memberDN in $attrs["member"]) {
+                # EXACT same check as debug script
+                if ($allGroups.ContainsKey($memberDN)) {
+                    $nestedGroupName = $allGroups[$memberDN]
+                    $nestedGroupsInThisGroup++
+                    $totalNestedRelationships++
+                    
+                    # Collect samples
+                    if ($sampleRelationships.Count -lt 20) {
+                        $sampleRelationships += @{
+                            ParentGroup = $groupName
+                            NestedGroup = $nestedGroupName
+                        }
                     }
                 }
             }
         }
-        
+
         if ($nestedGroupsInThisGroup -gt 0) {
             $groupsWithNestedGroups++
         }
-    }
-}
 
-# Show results
+        # Progress every 500 groups
+        if ($groupsProcessed % 500 -eq 0) {
+            Write-Host "    Processed $groupsProcessed groups..."
+        }
+    }
+
+    $cookie2 = ($response2.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
+    $pagingControl2.Cookie = $cookie2
+
+} while ($null -ne $cookie2 -and $cookie2.Length -ne 0)
+
+# Results
 Write-Host "`nFINAL RESULTS:" -ForegroundColor Green
 Write-Host "==============" -ForegroundColor Green
-Write-Host "Total Groups in AD: $totalGroups" -ForegroundColor Cyan
+Write-Host "Groups in lookup table: $($allGroups.Count)" -ForegroundColor Cyan
+Write-Host "Groups with members processed: $groupsProcessed" -ForegroundColor Cyan
 Write-Host "Groups with nested groups: $groupsWithNestedGroups" -ForegroundColor Yellow
-Write-Host "Total group-to-group relationships: $totalNestedRelationships" -ForegroundColor Yellow
+Write-Host "Total nested relationships: $totalNestedRelationships" -ForegroundColor Yellow
 
 if ($sampleRelationships.Count -gt 0) {
-    Write-Host "`nSample nested group relationships:" -ForegroundColor Green
-    foreach ($rel in $sampleRelationships[0..9]) {  # Show first 10
-        Write-Host "  '$($rel.ParentGroup)' contains '$($rel.NestedGroup)'" -ForegroundColor White
-    }
-    
-    if ($sampleRelationships.Count -gt 10) {
-        Write-Host "  ... and $($sampleRelationships.Count - 10) more relationships" -ForegroundColor Gray
+    Write-Host "`nFirst 10 relationships found:" -ForegroundColor Green
+    foreach ($rel in $sampleRelationships[0..9]) {
+        Write-Host "  '$($rel.ParentGroup)' → '$($rel.NestedGroup)'" -ForegroundColor White
     }
 } else {
-    Write-Host "`nNo nested group relationships found!" -ForegroundColor Red
+    Write-Host "`n❌ STILL ZERO - Something else is wrong!" -ForegroundColor Red
+    Write-Host "Debug script found 9 relationships in 10 groups" -ForegroundColor Yellow
+    Write-Host "This should find thousands in $groupsProcessed groups" -ForegroundColor Yellow
 }
-
-Write-Host "`n✓ Nested group detection is now working!" -ForegroundColor Green
 ```
 
 } catch {
-Write-Error “Error during group counting: $_”
+Write-Error “Error: $_”
 throw
 } finally {
 if ($connection) { $connection.Dispose() }
