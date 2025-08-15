@@ -9,12 +9,12 @@ param()
 
 # Import existing modules
 
-Import-Module (Join-Path $PSScriptRoot "..\..\Modules\AD.Functions.psm1") -Force
-Import-Module (Join-Path $PSScriptRoot "..\..\Modules\Common.Functions.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot “....\Modules\AD.Functions.psm1”) -Force
+Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”) -Force
 
 # Get configuration
 
-$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot "..\..\Modules\giam-config.json") -Force -Verbose
+$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
 
 Write-Host “Collecting AD nested groups…” -ForegroundColor Cyan
 
@@ -25,6 +25,7 @@ try {
 # Create LDAP connection using existing function
 $connection = New-LDAPConnection -Config $config.ActiveDirectory
 
+```
 # Search for all groups
 $searchRequest = New-LDAPSearchRequest `
     -SearchBase $config.ActiveDirectory.OrganizationalUnit `
@@ -126,18 +127,79 @@ foreach ($groupDN in $allGroups.Keys) {
 
 Write-Host "Found $($rootGroups.Count) root groups with nesting"
 
+# Debug output
+if ($rootGroups.Count -eq 0) {
+    Write-Warning "No root groups with nested groups found!"
+    
+    # Show some stats for debugging
+    $groupsWithMembers = 0
+    foreach ($groupDN in $groupMembers.Keys) {
+        if ($groupMembers[$groupDN].Count -gt 0) {
+            $groupsWithMembers++
+            if ($groupsWithMembers -le 5) {
+                Write-Host "Group with members: $($allGroups[$groupDN]) has $($groupMembers[$groupDN].Count) members"
+            }
+        }
+    }
+    Write-Host "Total groups with members: $groupsWithMembers"
+    
+    # Create simple list instead
+    $allGroupsList = @()
+    foreach ($groupDN in $allGroups.Keys) {
+        if ($groupMembers[$groupDN].Count -gt 0) {
+            $memberNames = @()
+            foreach ($memberDN in $groupMembers[$groupDN]) {
+                if ($allGroups.ContainsKey($memberDN)) {
+                    $memberNames += $allGroups[$memberDN]
+                }
+            }
+            if ($memberNames.Count -gt 0) {
+                $allGroupsList += @{
+                    Name = $allGroups[$groupDN]
+                    NestedGroupNames = $memberNames
+                }
+            }
+        }
+    }
+    $rootGroups = $allGroupsList
+    Write-Host "Created flat list with $($rootGroups.Count) groups"
+}
+
 # Output to JSON
 $outputPath = "C:\temp\nested.json"
 
 # Ensure temp directory exists
 if (-not (Test-Path "C:\temp")) {
+    Write-Host "Creating C:\temp directory..."
     New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null
 }
 
-$rootGroups | ConvertTo-Json -Depth 50 | Set-Content -Path $outputPath -Encoding UTF8
-
-Write-Host "Nested groups exported to: $outputPath" -ForegroundColor Green
-
+try {
+    Write-Host "Converting to JSON..."
+    $jsonContent = $rootGroups | ConvertTo-Json -Depth 20
+    
+    Write-Host "Writing to file..."
+    $jsonContent | Set-Content -Path $outputPath -Encoding UTF8
+    
+    # Verify file was created
+    if (Test-Path $outputPath) {
+        $fileSize = (Get-Item $outputPath).Length
+        Write-Host "Nested groups exported to: $outputPath" -ForegroundColor Green
+        Write-Host "File size: $fileSize bytes" -ForegroundColor Green
+    } else {
+        Write-Error "File was not created!"
+    }
+    
+} catch {
+    Write-Error "Failed to create JSON: $_"
+    
+    # Try simple export
+    Write-Host "Attempting simple text export..."
+    $textPath = "C:\temp\nested.txt"
+    $rootGroups | Out-String | Set-Content -Path $textPath
+    Write-Host "Text export created: $textPath"
+}
+```
 
 } catch {
 Write-Error “Error collecting nested groups: $_”
