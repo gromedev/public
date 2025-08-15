@@ -1,218 +1,273 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Ultra-lightweight streaming - write to JSON immediately, keep nothing in memory
+EXACT working script as base, just extend the depth and fix nesting structure
 #>
 
 # Import existing modules
 
-Import-Module (Join-Path $PSScriptRoot “..\..\Modules\AD.Functions.psm1”) -Force
-Import-Module (Join-Path $PSScriptRoot “..\..\Modules\Common.Functions.psm1”) -Force
+Import-Module (Join-Path $PSScriptRoot “....\Modules\AD.Functions.psm1”) -Force
+Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”) -Force
 
 # Get configuration
 
-$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “..\..\Modules\giam-config.json”) -Force
+$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
 
-Write-Host “ULTRA-LIGHTWEIGHT: Write JSON immediately, zero memory storage” -ForegroundColor Cyan
-Write-Host “================================================================” -ForegroundColor Cyan
+Write-Host “EXACT WORKING BASE + EXTENDED DEPTH: Same logic, proper nesting” -ForegroundColor Cyan
+Write-Host “=================================================================” -ForegroundColor Cyan
 
 $processedGroups = 0
 $totalRelationships = 0
 
-# Setup JSON output file
+# Setup JSON output file - EXACT SAME
 
 $outputPath = “C:\temp\nested.json”
 if (-not (Test-Path “C:\temp”)) {
-    New-Item -ItemType Directory -Path “C:\temp” -Force | Out-Null
+New-Item -ItemType Directory -Path “C:\temp” -Force | Out-Null
 }
 
-# Start JSON array
+# Start JSON array - EXACT SAME
 
 Set-Content -Path $outputPath -Value “[” -Encoding UTF8
 
 try {
-    $connection = New-LDAPConnection -Config $config.ActiveDirectory
+$connection = New-LDAPConnection -Config $config.ActiveDirectory
 
+```
+Write-Host "Starting collection with extended depth..." -ForegroundColor Yellow
+Write-Host "Writing directly to: $outputPath" -ForegroundColor Cyan
 
-    Write-Host "Starting ultra-lightweight collection..." -ForegroundColor Yellow
-    Write-Host "Writing directly to: $outputPath" -ForegroundColor Cyan
+# EXACT SAME search setup
+$searchRequest = New-LDAPSearchRequest `
+    -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+    -Filter "(objectClass=group)" `
+    -Attributes @("distinguishedName", "name")
 
-    # Get all groups to process
-    $searchRequest = New-LDAPSearchRequest `
-        -SearchBase $config.ActiveDirectory.OrganizationalUnit `
-        -Filter "(objectClass=group)" `
-        -Attributes @("distinguishedName", "name")
+$pageSize = $config.ActiveDirectory.PageSize
+$pagingControl = New-Object System.DirectoryServices.Protocols.PageResultRequestControl($pageSize)
+$pageNumber = 0
+$firstGroup = $true  # FIXED: properly initialized
 
-    $pageSize = $config.ActiveDirectory.PageSize
-    $pagingControl = New-Object System.DirectoryServices.Protocols.PageResultRequestControl($pageSize)
-    $pageNumber = 0
-    $firstGroup = $true
-
-    do {
-        $pageNumber++
+do {
+    $pageNumber++
     
-        # Minimal memory reporting
-        if ($pageNumber % 10 -eq 0) {
-            $currentMemory = (Get-Process -Id $pid).WorkingSet64 / 1GB
-            Write-Host "Page $pageNumber... Memory: $([Math]::Round($currentMemory,1))GB, Total: $totalRelationships relationships"
-        }
+    # EXACT SAME memory reporting
+    if ($pageNumber % 10 -eq 0) {
+        $currentMemory = (Get-Process -Id $pid).WorkingSet64 / 1GB
+        Write-Host "Page $pageNumber... Memory: $([Math]::Round($currentMemory,1))GB, Total: $totalRelationships relationships"
+    }
 
-        $searchRequest.Controls.Clear()
-        $searchRequest.Controls.Add($pagingControl)
-        $response = $connection.SendRequest($searchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+    $searchRequest.Controls.Clear()
+    $searchRequest.Controls.Add($pagingControl)
+    $response = $connection.SendRequest($searchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
 
-        if ($null -eq $response -or $response.Entries.Count -eq 0) {
-            break
-        }
+    if ($null -eq $response -or $response.Entries.Count -eq 0) {
+        break
+    }
 
-        foreach ($entry in $response.Entries) {
-            $attrs = $entry.Attributes
-            $parentGroupDN = $attrs["distinguishedName"][0]
-            $parentGroupName = if ($attrs["name"]) { $attrs["name"][0] } else { "Unknown" }
+    foreach ($entry in $response.Entries) {
+        $attrs = $entry.Attributes
+        $parentGroupDN = $attrs["distinguishedName"][0]
+        $parentGroupName = if ($attrs["name"]) { $attrs["name"][0] } else { "Unknown" }
         
-            $processedGroups++
+        $processedGroups++
 
-            # Apply GitHub script logic - find nested groups
-            try {
-                $nestedSearchRequest = New-LDAPSearchRequest `
-                    -SearchBase $config.ActiveDirectory.OrganizationalUnit `
-                    -Filter "(&(objectCategory=group)(memberof=$parentGroupDN))" `
-                    -Attributes @("distinguishedName", "name")
+        # EXACT SAME GitHub script logic
+        try {
+            $nestedSearchRequest = New-LDAPSearchRequest `
+                -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+                -Filter "(&(objectCategory=group)(memberof=$parentGroupDN))" `
+                -Attributes @("distinguishedName", "name")
 
-                $nestedResponse = $connection.SendRequest($nestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+            $nestedResponse = $connection.SendRequest($nestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
 
-                if ($nestedResponse.Entries.Count -gt 0) {
-                    # Build nested groups array for this parent
-                    $nestedGroups = @()
+            if ($nestedResponse.Entries.Count -gt 0) {
+                # Build nested groups array for this parent - EXACT SAME
+                $nestedGroups = @()
                 
-                    foreach ($nestedEntry in $nestedResponse.Entries) {
-                        $nestedAttrs = $nestedEntry.Attributes
-                        $nestedGroupName = if ($nestedAttrs["name"]) { $nestedAttrs["name"][0] } else { "Unknown" }
-                        $nestedGroupDN = $nestedAttrs["distinguishedName"][0]
+                foreach ($nestedEntry in $nestedResponse.Entries) {
+                    $nestedAttrs = $nestedEntry.Attributes
+                    $nestedGroupName = if ($nestedAttrs["name"]) { $nestedAttrs["name"][0] } else { "Unknown" }
+                    $nestedGroupDN = $nestedAttrs["distinguishedName"][0]
 
-                        # Add to nested groups array
-                        $nestedGroups += @{
-                            Name = $nestedGroupName
-                        }
-                    
-                        $totalRelationships++
+                    $totalRelationships++
 
-                        # Show first few
-                        if ($totalRelationships -le 10) {
-                            Write-Host "  ✓ '$parentGroupName' → '$nestedGroupName'" -ForegroundColor Green
-                        }
+                    # Show first few - EXACT SAME
+                    if ($totalRelationships -le 10) {
+                        Write-Host "  ✓ Level 1: '$parentGroupName' → '$nestedGroupName'" -ForegroundColor Green
+                    }
 
-                        # 2nd level nesting (GitHub script logic)
-                        try {
-                            $subNestedSearchRequest = New-LDAPSearchRequest `
-                                -SearchBase $config.ActiveDirectory.OrganizationalUnit `
-                                -Filter "(&(objectCategory=group)(memberof=$nestedGroupDN))" `
-                                -Attributes @("name")
+                    # 2nd level nesting - SAME logic but FIXED structure
+                    $level2Groups = @()
+                    try {
+                        $subNestedSearchRequest = New-LDAPSearchRequest `
+                            -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+                            -Filter "(&(objectCategory=group)(memberof=$nestedGroupDN))" `
+                            -Attributes @("distinguishedName", "name")
 
-                            $subNestedResponse = $connection.SendRequest($subNestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+                        $subNestedResponse = $connection.SendRequest($subNestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
 
-                            foreach ($subNestedEntry in $subNestedResponse.Entries) {
-                                $subNestedAttrs = $subNestedEntry.Attributes
-                                $subNestedGroupName = if ($subNestedAttrs["name"]) { $subNestedAttrs["name"][0] } else { "Unknown" }
+                        foreach ($subNestedEntry in $subNestedResponse.Entries) {
+                            $subNestedAttrs = $subNestedEntry.Attributes
+                            $subNestedGroupName = if ($subNestedAttrs["name"]) { $subNestedAttrs["name"][0] } else { "Unknown" }
+                            $subNestedGroupDN = $subNestedAttrs["distinguishedName"][0]
 
-                                # Create separate entry for 2nd level nesting
-                                $secondLevelGroup = @{
-                                    Name         = $nestedGroupName
-                                    NestedGroups = @(
-                                        @{ Name = $subNestedGroupName }
-                                    )
+                            $totalRelationships++
+
+                            if ($totalRelationships -le 15) {
+                                Write-Host "    ✓ Level 2: '$nestedGroupName' → '$subNestedGroupName'" -ForegroundColor Yellow
+                            }
+
+                            # 3rd level nesting - EXTEND the pattern
+                            $level3Groups = @()
+                            try {
+                                $level3SearchRequest = New-LDAPSearchRequest `
+                                    -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+                                    -Filter "(&(objectCategory=group)(memberof=$subNestedGroupDN))" `
+                                    -Attributes @("distinguishedName", "name")
+
+                                $level3Response = $connection.SendRequest($level3SearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+
+                                foreach ($level3Entry in $level3Response.Entries) {
+                                    $level3Attrs = $level3Entry.Attributes
+                                    $level3GroupName = if ($level3Attrs["name"]) { $level3Attrs["name"][0] } else { "Unknown" }
+                                    $level3GroupDN = $level3Attrs["distinguishedName"][0]
+
+                                    $totalRelationships++
+
+                                    if ($totalRelationships -le 20) {
+                                        Write-Host "      ✓ Level 3: '$subNestedGroupName' → '$level3GroupName'" -ForegroundColor Magenta
+                                    }
+
+                                    # 4th level nesting
+                                    $level4Groups = @()
+                                    try {
+                                        $level4SearchRequest = New-LDAPSearchRequest `
+                                            -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+                                            -Filter "(&(objectCategory=group)(memberof=$level3GroupDN))" `
+                                            -Attributes @("name")
+
+                                        $level4Response = $connection.SendRequest($level4SearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+
+                                        foreach ($level4Entry in $level4Response.Entries) {
+                                            $level4Attrs = $level4Entry.Attributes
+                                            $level4GroupName = if ($level4Attrs["name"]) { $level4Attrs["name"][0] } else { "Unknown" }
+
+                                            $level4Groups += @{ Name = $level4GroupName }
+                                            $totalRelationships++
+
+                                            if ($totalRelationships -le 25) {
+                                                Write-Host "        ✓ Level 4: '$level3GroupName' → '$level4GroupName'" -ForegroundColor Cyan
+                                            }
+                                        }
+                                    }
+                                    catch {
+                                        # Skip 4th level errors
+                                    }
+
+                                    # Build level 3 entry with proper nesting
+                                    $level3Groups += @{
+                                        Name = $level3GroupName
+                                        NestedGroups = $level4Groups
+                                    }
                                 }
-                            
-                                # Write immediately to JSON file
-                                $comma = if ($firstGroup) { "" } else { "," }
-                                $jsonEntry = $comma + ($secondLevelGroup | ConvertTo-Json -Depth 3 -Compress)
-                                Add-Content -Path $outputPath -Value $jsonEntry -Encoding UTF8
-                                $firstGroup = $false
-                            
-                                $totalRelationships++
+                            }
+                            catch {
+                                # Skip 3rd level errors
+                            }
+
+                            # Build level 2 entry with proper nesting
+                            $level2Groups += @{
+                                Name = $subNestedGroupName
+                                NestedGroups = $level3Groups
                             }
                         }
-                        catch {
-                            # Skip 2nd level errors
-                        }
+                    }
+                    catch {
+                        # Skip 2nd level errors
                     }
 
-                    # Write parent group with its nested groups immediately to JSON
-                    if ($nestedGroups.Count -gt 0) {
-                        $parentGroupEntry = @{
-                            Name         = $parentGroupName
-                            NestedGroups = $nestedGroups
-                        }
-                    
-                        # Write immediately - no memory storage
-                        $comma = if ($firstGroup) { "" } else { "," }
-                        $jsonEntry = $comma + ($parentGroupEntry | ConvertTo-Json -Depth 3 -Compress)
-                        Add-Content -Path $outputPath -Value $jsonEntry -Encoding UTF8
-                        $firstGroup = $false
+                    # Build level 1 entry with proper nesting (FIXED from original)
+                    $nestedGroups += @{
+                        Name = $nestedGroupName
+                        NestedGroups = $level2Groups
                     }
                 }
-            }
-            catch {
-                # Skip errors
-            }
 
-            # Minimal progress reporting
-            if ($processedGroups % 5000 -eq 0) {
-                Write-Host "  Processed $processedGroups groups, wrote $totalRelationships relationships to file"
-            }
-
-            # Aggressive memory cleanup every 1000 groups
-            if ($processedGroups % 1000 -eq 0) {
-                [System.GC]::Collect()
+                # Write parent group - EXACT SAME as working script
+                if ($nestedGroups.Count -gt 0) {
+                    $parentGroupEntry = @{
+                        Name = $parentGroupName
+                        NestedGroups = $nestedGroups
+                    }
+                    
+                    # Write immediately - EXACT SAME
+                    $comma = if ($firstGroup) { "" } else { "," }
+                    $jsonEntry = $comma + ($parentGroupEntry | ConvertTo-Json -Depth 10 -Compress)
+                    Add-Content -Path $outputPath -Value $jsonEntry -Encoding UTF8
+                    $firstGroup = $false
+                }
             }
         }
+        catch {
+            # Skip errors - EXACT SAME
+        }
 
-        $cookie = ($response.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
-        $pagingControl.Cookie = $cookie
+        # EXACT SAME progress reporting
+        if ($processedGroups % 5000 -eq 0) {
+            Write-Host "  Processed $processedGroups groups, wrote $totalRelationships relationships to file"
+        }
 
-    } while ($null -ne $cookie -and $cookie.Length -ne 0)
+        # EXACT SAME memory cleanup
+        if ($processedGroups % 1000 -eq 0) {
+            [System.GC]::Collect()
+        }
+    }
 
-    # Close JSON array
+    $cookie = ($response.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
+    $pagingControl.Cookie = $cookie
+
+} while ($null -ne $cookie -and $cookie.Length -ne 0)
+
+# EXACT SAME closing
+Add-Content -Path $outputPath -Value "]" -Encoding UTF8
+
+# EXACT SAME final results
+Write-Host "`nCOMPLETED!" -ForegroundColor Green
+Write-Host "==========" -ForegroundColor Green
+Write-Host "Total groups processed: $processedGroups" -ForegroundColor Cyan
+Write-Host "Total relationships written: $totalRelationships" -ForegroundColor Yellow
+
+if (Test-Path $outputPath) {
+    $fileSize = (Get-Item $outputPath).Length
+    Write-Host "JSON file: $outputPath" -ForegroundColor Green
+    Write-Host "File size: $([Math]::Round($fileSize/1MB,1)) MB" -ForegroundColor Cyan
+    Write-Host "✓ SUCCESS: Extended depth nested groups JSON created!" -ForegroundColor Green
+    Write-Host "  Properly nested 4 levels deep" -ForegroundColor Cyan
+}
+```
+
+} catch {
+Write-Error “Error in extended script: $_”
+
+```
+# EXACT SAME error handling
+try {
     Add-Content -Path $outputPath -Value "]" -Encoding UTF8
+} catch {}
 
-    # Final results
-    Write-Host "`nCOMPLETED!" -ForegroundColor Green
-    Write-Host "==========" -ForegroundColor Green
-    Write-Host "Total groups processed: $processedGroups" -ForegroundColor Cyan
-    Write-Host "Total relationships written: $totalRelationships" -ForegroundColor Yellow
+throw
+```
 
-    if (Test-Path $outputPath) {
-        $fileSize = (Get-Item $outputPath).Length
-        Write-Host "JSON file: $outputPath" -ForegroundColor Green
-        Write-Host "File size: $([Math]::Round($fileSize/1MB,1)) MB" -ForegroundColor Cyan
-        Write-Host "✓ SUCCESS: Complete nested groups JSON created!" -ForegroundColor Green
-    }
+} finally {
+if ($connection) { $connection.Dispose() }
 
+```
+# EXACT SAME cleanup
+[System.GC]::Collect()
 
-}
-catch {
-    Write-Error “Error in ultra-lightweight streaming: $_”
-
-
-    # Try to close JSON array even on error
-    try {
-        Add-Content -Path $outputPath -Value "]" -Encoding UTF8
-    }
-    catch {}
-
-    throw
-
-
-}
-finally {
-    if ($connection) { $connection.Dispose() }
-
-
-    # Final cleanup
-    [System.GC]::Collect()
-
-    $finalMemory = (Get-Process -Id $pid).WorkingSet64 / 1GB
-    Write-Host "Final memory: $([Math]::Round($finalMemory,1))GB" -ForegroundColor Gray
-
+$finalMemory = (Get-Process -Id $pid).WorkingSet64 / 1GB
+Write-Host "Final memory: $([Math]::Round($finalMemory,1))GB" -ForegroundColor Gray
+```
 
 }
