@@ -62,17 +62,14 @@ do {
         
         $allGroups[$groupDN] = $groupName
         
-        # Find nested groups
-        $nestedGroups = @()
+        # Store all members first, we'll filter later
+        $allMembers = @()
         if ($attrs["member"]) {
             foreach ($memberDN in $attrs["member"]) {
-                # Check if member DN looks like a group
-                if ($memberDN -match "CN=.*") {
-                    $nestedGroups += $memberDN
-                }
+                $allMembers += $memberDN
             }
         }
-        $groupMembers[$groupDN] = $nestedGroups
+        $groupMembers[$groupDN] = $allMembers
     }
     
     $cookie = ($response.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
@@ -82,6 +79,25 @@ do {
 
 Write-Host "Found $($allGroups.Count) groups"
 
+# Now filter members to only include actual groups
+Write-Host "Filtering group members..."
+$filteredGroupMembers = @{}
+$totalGroupMemberships = 0
+
+foreach ($groupDN in $groupMembers.Keys) {
+    $nestedGroups = @()
+    foreach ($memberDN in $groupMembers[$groupDN]) {
+        # Only include if the member is actually a group we found
+        if ($allGroups.ContainsKey($memberDN)) {
+            $nestedGroups += $memberDN
+            $totalGroupMemberships++
+        }
+    }
+    $filteredGroupMembers[$groupDN] = $nestedGroups
+}
+
+Write-Host "Found $totalGroupMemberships total group-in-group memberships"
+
 # Build nested structure
 Write-Host "Building nested structure..."
 
@@ -89,7 +105,7 @@ function Get-NestedGroups {
     param($GroupDN)
     
     $nestedGroups = @()
-    foreach ($memberDN in $groupMembers[$GroupDN]) {
+    foreach ($memberDN in $filteredGroupMembers[$GroupDN]) {
         if ($allGroups.ContainsKey($memberDN)) {
             $nestedGroup = @{
                 Name = $allGroups[$memberDN]
@@ -103,8 +119,8 @@ function Get-NestedGroups {
 
 # Find root groups (not members of other groups)
 $memberOfMap = @{}
-foreach ($groupDN in $groupMembers.Keys) {
-    foreach ($memberDN in $groupMembers[$groupDN]) {
+foreach ($groupDN in $filteredGroupMembers.Keys) {
+    foreach ($memberDN in $filteredGroupMembers[$groupDN]) {
         if ($allGroups.ContainsKey($memberDN)) {
             $memberOfMap[$memberDN] = $true
         }
@@ -133,22 +149,22 @@ if ($rootGroups.Count -eq 0) {
     
     # Show some stats for debugging
     $groupsWithMembers = 0
-    foreach ($groupDN in $groupMembers.Keys) {
-        if ($groupMembers[$groupDN].Count -gt 0) {
+    foreach ($groupDN in $filteredGroupMembers.Keys) {
+        if ($filteredGroupMembers[$groupDN].Count -gt 0) {
             $groupsWithMembers++
             if ($groupsWithMembers -le 5) {
-                Write-Host "Group with members: $($allGroups[$groupDN]) has $($groupMembers[$groupDN].Count) members"
+                Write-Host "Group with nested groups: $($allGroups[$groupDN]) has $($filteredGroupMembers[$groupDN].Count) nested groups"
             }
         }
     }
-    Write-Host "Total groups with members: $groupsWithMembers"
+    Write-Host "Total groups with nested groups: $groupsWithMembers"
     
     # Create simple list instead
     $allGroupsList = @()
     foreach ($groupDN in $allGroups.Keys) {
-        if ($groupMembers[$groupDN].Count -gt 0) {
+        if ($filteredGroupMembers[$groupDN].Count -gt 0) {
             $memberNames = @()
-            foreach ($memberDN in $groupMembers[$groupDN]) {
+            foreach ($memberDN in $filteredGroupMembers[$groupDN]) {
                 if ($allGroups.ContainsKey($memberDN)) {
                     $memberNames += $allGroups[$memberDN]
                 }
@@ -168,14 +184,34 @@ if ($rootGroups.Count -eq 0) {
 # Output to JSON
 $outputPath = "C:\temp\nested.json"
 
-# Ensure temp directory exists
-if (-not (Test-Path "C:\temp")) {
-    Write-Host "Creating C:\temp directory..."
-    New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null
+# Ensure temp directory exists and is writable
+try {
+    if (-not (Test-Path "C:\temp")) {
+        Write-Host "Creating C:\temp directory..."
+        New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null
+    }
+    
+    # Test write access
+    $testFile = "C:\temp\test_write.tmp"
+    "test" | Set-Content -Path $testFile -ErrorAction Stop
+    Remove-Item $testFile -ErrorAction SilentlyContinue
+    Write-Host "C:\temp is writable"
+    
+} catch {
+    Write-Warning "Cannot write to C:\temp: $_"
+    $outputPath = ".\nested.json"
+    Write-Host "Using current directory instead: $outputPath"
 }
 
 try {
     Write-Host "Converting to JSON..."
+    
+    # If still no groups, create empty structure
+    if ($rootGroups.Count -eq 0) {
+        $rootGroups = @()
+        Write-Host "Creating empty JSON structure"
+    }
+    
     $jsonContent = $rootGroups | ConvertTo-Json -Depth 20
     
     Write-Host "Writing to file..."
@@ -186,6 +222,7 @@ try {
         $fileSize = (Get-Item $outputPath).Length
         Write-Host "Nested groups exported to: $outputPath" -ForegroundColor Green
         Write-Host "File size: $fileSize bytes" -ForegroundColor Green
+        Write-Host "Groups in output: $($rootGroups.Count)" -ForegroundColor Green
     } else {
         Write-Error "File was not created!"
     }
@@ -199,7 +236,6 @@ try {
     $rootGroups | Out-String | Set-Content -Path $textPath
     Write-Host "Text export created: $textPath"
 }
-```
 
 } catch {
 Write-Error “Error collecting nested groups: $_”
