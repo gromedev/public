@@ -9,12 +9,12 @@ param()
 
 # Import existing modules
 
-Import-Module (Join-Path $PSScriptRoot “....\Modules\AD.Functions.psm1”) -Force
-Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”) -Force
+Import-Module (Join-Path $PSScriptRoot "..\..\Modules\AD.Functions.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "..\..\Modules\Common.Functions.psm1") -Force
 
 # Get configuration
 
-$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
+$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot "..\..\Modules\giam-config.json") -Force -Verbose
 
 Write-Host “Collecting AD nested groups…” -ForegroundColor Cyan
 
@@ -25,7 +25,6 @@ try {
 # Create LDAP connection using existing function
 $connection = New-LDAPConnection -Config $config.ActiveDirectory
 
-```
 # Search for all groups
 $searchRequest = New-LDAPSearchRequest `
     -SearchBase $config.ActiveDirectory.OrganizationalUnit `
@@ -138,7 +137,7 @@ if (-not (Test-Path "C:\temp")) {
 $rootGroups | ConvertTo-Json -Depth 50 | Set-Content -Path $outputPath -Encoding UTF8
 
 Write-Host "Nested groups exported to: $outputPath" -ForegroundColor Green
-```
+
 
 } catch {
 Write-Error “Error collecting nested groups: $_”
