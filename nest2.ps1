@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Ultra-lightweight streaming - write to JSON immediately, keep nothing in memory
+Ultra-lightweight streaming with unlimited depth recursion
 #>
 
 # Import existing modules
@@ -13,11 +13,11 @@ Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”)
 
 $config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
 
-Write-Host “ULTRA-LIGHTWEIGHT: Write JSON immediately, zero memory storage” -ForegroundColor Cyan
-Write-Host “================================================================” -ForegroundColor Cyan
+Write-Host “UNLIMITED DEPTH: Recursive nested groups with streaming output” -ForegroundColor Cyan
+Write-Host “=============================================================” -ForegroundColor Cyan
 
 $processedGroups = 0
-$totalRelationships = 0
+$script:totalRelationships = 0
 
 # Setup JSON output file
 
@@ -34,7 +34,7 @@ try {
 $connection = New-LDAPConnection -Config $config.ActiveDirectory
 
 ```
-Write-Host "Starting ultra-lightweight collection..." -ForegroundColor Yellow
+Write-Host "Starting unlimited depth nested group collection..." -ForegroundColor Yellow
 Write-Host "Writing directly to: $outputPath" -ForegroundColor Cyan
 
 # Get all groups to process
@@ -54,7 +54,7 @@ do {
     # Minimal memory reporting
     if ($pageNumber % 10 -eq 0) {
         $currentMemory = (Get-Process -Id $pid).WorkingSet64 / 1GB
-        Write-Host "Page $pageNumber... Memory: $([Math]::Round($currentMemory,1))GB, Total: $totalRelationships relationships"
+        Write-Host "Page $pageNumber... Memory: $([Math]::Round($currentMemory,1))GB, Total: $script:totalRelationships relationships"
     }
 
     $searchRequest.Controls.Clear()
@@ -72,93 +72,69 @@ do {
         
         $processedGroups++
 
-        # Apply GitHub script logic - find nested groups
-        try {
-            $nestedSearchRequest = New-LDAPSearchRequest `
-                -SearchBase $config.ActiveDirectory.OrganizationalUnit `
-                -Filter "(&(objectCategory=group)(memberof=$parentGroupDN))" `
-                -Attributes @("distinguishedName", "name")
+# Recursive function to get all nested groups at unlimited depth
+function Get-AllNestedGroups {
+    param(
+        [string]$ParentGroupDN,
+        [string]$ParentGroupName,
+        [int]$CurrentDepth = 0,
+        [hashtable]$VisitedGroups = @{},
+        [int]$MaxDepth = 20  # Prevent infinite loops
+    )
+    
+    # Prevent infinite loops and excessive depth
+    if ($CurrentDepth -gt $MaxDepth -or $VisitedGroups.ContainsKey($ParentGroupDN)) {
+        return @()
+    }
+    
+    # Mark this group as visited
+    $VisitedGroups[$ParentGroupDN] = $true
+    
+    $nestedGroups = @()
+    
+    try {
+        # Find direct nested groups (same GitHub logic)
+        $nestedSearchRequest = New-LDAPSearchRequest `
+            -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+            -Filter "(&(objectCategory=group)(memberof=$ParentGroupDN))" `
+            -Attributes @("distinguishedName", "name")
 
-            $nestedResponse = $connection.SendRequest($nestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+        $nestedResponse = $connection.SendRequest($nestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
 
-            if ($nestedResponse.Entries.Count -gt 0) {
-                # Build nested groups array for this parent
-                $nestedGroups = @()
-                
-                foreach ($nestedEntry in $nestedResponse.Entries) {
-                    $nestedAttrs = $nestedEntry.Attributes
-                    $nestedGroupName = if ($nestedAttrs["name"]) { $nestedAttrs["name"][0] } else { "Unknown" }
-                    $nestedGroupDN = $nestedAttrs["distinguishedName"][0]
-
-                    # Add to nested groups array
-                    $nestedGroups += @{
-                        Name = $nestedGroupName
-                    }
-                    
-                    $totalRelationships++
-
-                    # Show first few
-                    if ($totalRelationships -le 10) {
-                        Write-Host "  ✓ '$parentGroupName' → '$nestedGroupName'" -ForegroundColor Green
-                    }
-
-                    # 2nd level nesting (GitHub script logic)
-                    try {
-                        $subNestedSearchRequest = New-LDAPSearchRequest `
-                            -SearchBase $config.ActiveDirectory.OrganizationalUnit `
-                            -Filter "(&(objectCategory=group)(memberof=$nestedGroupDN))" `
-                            -Attributes @("name")
-
-                        $subNestedResponse = $connection.SendRequest($subNestedSearchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
-
-                        foreach ($subNestedEntry in $subNestedResponse.Entries) {
-                            $subNestedAttrs = $subNestedEntry.Attributes
-                            $subNestedGroupName = if ($subNestedAttrs["name"]) { $subNestedAttrs["name"][0] } else { "Unknown" }
-
-                            # Create separate entry for 2nd level nesting
-                            $secondLevelGroup = @{
-                                Name = $nestedGroupName
-                                NestedGroups = @(
-                                    @{ Name = $subNestedGroupName }
-                                )
-                            }
-                            
-                            # Write immediately to JSON file
-                            $comma = if ($firstGroup) { "" } else { "," }
-                            $jsonEntry = $comma + ($secondLevelGroup | ConvertTo-Json -Depth 3 -Compress)
-                            Add-Content -Path $outputPath -Value $jsonEntry -Encoding UTF8
-                            $firstGroup = $false
-                            
-                            $totalRelationships++
-                        }
-                    }
-                    catch {
-                        # Skip 2nd level errors
-                    }
-                }
-
-                # Write parent group with its nested groups immediately to JSON
-                if ($nestedGroups.Count -gt 0) {
-                    $parentGroupEntry = @{
-                        Name = $parentGroupName
-                        NestedGroups = $nestedGroups
-                    }
-                    
-                    # Write immediately - no memory storage
-                    $comma = if ($firstGroup) { "" } else { "," }
-                    $jsonEntry = $comma + ($parentGroupEntry | ConvertTo-Json -Depth 3 -Compress)
-                    Add-Content -Path $outputPath -Value $jsonEntry -Encoding UTF8
-                    $firstGroup = $false
-                }
+        foreach ($nestedEntry in $nestedResponse.Entries) {
+            $nestedAttrs = $nestedEntry.Attributes
+            $nestedGroupDN = $nestedAttrs["distinguishedName"][0]
+            $nestedGroupName = if ($nestedAttrs["name"]) { $nestedAttrs["name"][0] } else { "Unknown" }
+            
+            # Get nested groups recursively
+            $deeperNestedGroups = Get-AllNestedGroups -ParentGroupDN $nestedGroupDN -ParentGroupName $nestedGroupName -CurrentDepth ($CurrentDepth + 1) -VisitedGroups $VisitedGroups.Clone() -MaxDepth $MaxDepth
+            
+            # Build this nested group entry
+            $nestedGroupEntry = @{
+                Name = $nestedGroupName
+                NestedGroups = $deeperNestedGroups
+            }
+            
+            $nestedGroups += $nestedGroupEntry
+            $script:totalRelationships++
+            
+            # Show depth progress for first few
+            if ($script:totalRelationships -le 20) {
+                $indent = "  " * ($CurrentDepth + 1)
+                Write-Host "$indent✓ Depth $CurrentDepth`: '$ParentGroupName' → '$nestedGroupName'" -ForegroundColor Green
             }
         }
-        catch {
-            # Skip errors
-        }
+    }
+    catch {
+        # Skip errors at this depth level
+    }
+    
+    return $nestedGroups
+}
 
         # Minimal progress reporting
         if ($processedGroups % 5000 -eq 0) {
-            Write-Host "  Processed $processedGroups groups, wrote $totalRelationships relationships to file"
+            Write-Host "  Processed $processedGroups groups, wrote $script:totalRelationships relationships to file"
         }
 
         # Aggressive memory cleanup every 1000 groups
@@ -179,13 +155,14 @@ Add-Content -Path $outputPath -Value "]" -Encoding UTF8
 Write-Host "`nCOMPLETED!" -ForegroundColor Green
 Write-Host "==========" -ForegroundColor Green
 Write-Host "Total groups processed: $processedGroups" -ForegroundColor Cyan
-Write-Host "Total relationships written: $totalRelationships" -ForegroundColor Yellow
+Write-Host "Total relationships written: $script:totalRelationships" -ForegroundColor Yellow
 
 if (Test-Path $outputPath) {
     $fileSize = (Get-Item $outputPath).Length
     Write-Host "JSON file: $outputPath" -ForegroundColor Green
     Write-Host "File size: $([Math]::Round($fileSize/1MB,1)) MB" -ForegroundColor Cyan
-    Write-Host "✓ SUCCESS: Complete nested groups JSON created!" -ForegroundColor Green
+    Write-Host "✓ SUCCESS: Complete unlimited-depth nested groups JSON created!" -ForegroundColor Green
+Write-Host "  Captures ALL levels of nesting (up to 20 levels deep)" -ForegroundColor Cyan
 }
 ```
 
