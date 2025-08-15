@@ -1,344 +1,149 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Visualizes AD group hierarchy from JSON output in tree format
-.DESCRIPTION
-Reads the JSON output from Collect-ADNestedGroups.ps1 and displays it as a readable tree structure
-.EXAMPLE
-.\Show-ADGroupHierarchy.ps1 -JsonPath “.\GIAM-ADNestedGroups_20241215_143022.json”
-.\Show-ADGroupHierarchy.ps1 -JsonPath “.\GIAM-ADNestedGroups_20241215_143022.json” -GroupName “Domain Admins”
-.\Show-ADGroupHierarchy.ps1 -JsonPath “.\GIAM-ADNestedGroups_20241215_143022.json” -MaxDisplayDepth 3
+Simple AD nested groups collector - outputs to C:\temp\nested.json
 #>
 
 [CmdletBinding()]
-param(
-[Parameter(Mandatory)]
-[string]$JsonPath,                    # Path to the JSON file from Collect-ADNestedGroups.ps1
+param()
 
-```
-[string]$GroupName = $null,           # Optional: Show only specific group hierarchy
-[int]$MaxDisplayDepth = 10,           # Maximum depth to display
-[switch]$ShowStats,                   # Show detailed statistics
-[switch]$ShowPaths,                   # Show full paths instead of tree structure
-[switch]$OnlyGroupsWithNesting,       # Only show groups that contain other groups
-[string]$OutputFile = $null           # Optional: Save output to file
-```
+# Import existing modules
 
-)
+Import-Module (Join-Path $PSScriptRoot “....\Modules\AD.Functions.psm1”) -Force
+Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”) -Force
 
-function Show-GroupTree {
-<#
-.SYNOPSIS
-Recursively displays group hierarchy in tree format
-#>
-param(
-[object]$GroupData,
-[string]$Prefix = “”,
-[bool]$IsLast = $true,
-[int]$CurrentDepth = 0,
-[int]$MaxDepth = 10
-)
+# Get configuration
 
-```
-if ($CurrentDepth -gt $MaxDepth) {
-    return
-}
+$config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
 
-# Skip groups without nesting if OnlyGroupsWithNesting is specified
-if ($OnlyGroupsWithNesting -and $GroupData.NestedGroupCount -eq 0) {
-    return
-}
+Write-Host “Collecting AD nested groups…” -ForegroundColor Cyan
 
-# Determine tree symbols
-$currentSymbol = if ($IsLast) { "└── " } else { "├── " }
-$nextPrefix = if ($IsLast) { "$Prefix    " } else { "$Prefix│   " }
-
-# Format group information
-$groupInfo = $GroupData.Name
-if ($GroupData.NestedGroupCount -gt 0) {
-    $groupInfo += " ($($GroupData.NestedGroupCount) nested)"
-}
-if ($GroupData.CircularReference) {
-    $groupInfo += " [CIRCULAR]"
-}
-
-# Color coding based on depth and type
-$color = switch ($CurrentDepth) {
-    0 { "Cyan" }
-    1 { "Yellow" }  
-    2 { "Green" }
-    3 { "Magenta" }
-    default { "White" }
-}
-
-if ($GroupData.CircularReference) {
-    $color = "Red"
-}
-
-# Output the current group
-$output = "$Prefix$currentSymbol$groupInfo"
-if ($OutputFile) {
-    $output | Add-Content -Path $OutputFile
-} else {
-    Write-Host $output -ForegroundColor $color
-}
-
-# Process nested groups
-if ($GroupData.NestedGroups -and $GroupData.NestedGroups.Count -gt 0) {
-    for ($i = 0; $i -lt $GroupData.NestedGroups.Count; $i++) {
-        $isLastNested = ($i -eq ($GroupData.NestedGroups.Count - 1))
-        Show-GroupTree -GroupData $GroupData.NestedGroups[$i] -Prefix $nextPrefix -IsLast $isLastNested -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth
-    }
-}
-```
-
-}
-
-function Show-GroupPaths {
-<#
-.SYNOPSIS
-Shows group hierarchy as full paths
-#>
-param(
-[object]$GroupData,
-[string]$ParentPath = “”
-)
-
-```
-$currentPath = if ($ParentPath) { "$ParentPath → $($GroupData.Name)" } else { $GroupData.Name }
-
-# Skip groups without nesting if OnlyGroupsWithNesting is specified
-if (-not $OnlyGroupsWithNesting -or $GroupData.NestedGroupCount -gt 0) {
-    $pathInfo = "$currentPath"
-    if ($GroupData.NestedGroupCount -gt 0) {
-        $pathInfo += " [$($GroupData.NestedGroupCount) nested groups]"
-    }
-    if ($GroupData.CircularReference) {
-        $pathInfo += " [CIRCULAR REFERENCE]"
-    }
-    
-    if ($OutputFile) {
-        $pathInfo | Add-Content -Path $OutputFile
-    } else {
-        $color = if ($GroupData.CircularReference) { "Red" } elseif ($GroupData.NestedGroupCount -gt 0) { "Green" } else { "White" }
-        Write-Host $pathInfo -ForegroundColor $color
-    }
-}
-
-# Process nested groups
-if ($GroupData.NestedGroups -and $GroupData.NestedGroups.Count -gt 0) {
-    foreach ($nestedGroup in $GroupData.NestedGroups) {
-        Show-GroupPaths -GroupData $nestedGroup -ParentPath $currentPath
-    }
-}
-```
-
-}
-
-function Show-Statistics {
-<#
-.SYNOPSIS
-Displays detailed statistics about the group hierarchy
-#>
-param([object]$Data)
-
-```
-$stats = $Data.Statistics
-
-Write-Host "`n" + "="*60 -ForegroundColor Yellow
-Write-Host "AD GROUP HIERARCHY STATISTICS" -ForegroundColor Yellow
-Write-Host "="*60 -ForegroundColor Yellow
-
-Write-Host "Collection Information:" -ForegroundColor Cyan
-Write-Host "  Generated At: $($Data.GeneratedAt)" -ForegroundColor White
-Write-Host "  Root Group Filter: $(if ($Data.RootGroup) { $Data.RootGroup } else { 'All Groups' })" -ForegroundColor White
-Write-Host "  Max Depth Limit: $($Data.MaxDepth)" -ForegroundColor White
-Write-Host "  Include Empty Groups: $($Data.IncludeEmptyGroups)" -ForegroundColor White
-
-Write-Host "`nGroup Statistics:" -ForegroundColor Cyan
-Write-Host "  Total Groups in AD: $($stats.TotalGroups)" -ForegroundColor White
-Write-Host "  Groups with Nested Groups: $($stats.GroupsWithNestedGroups)" -ForegroundColor White
-Write-Host "  Root Groups (not nested): $($Data.GroupHierarchy.Count)" -ForegroundColor White
-Write-Host "  Maximum Nesting Depth: $($stats.MaxDepthFound)" -ForegroundColor White
-Write-Host "  Circular References Found: $($stats.CircularReferences)" -ForegroundColor $(if ($stats.CircularReferences -gt 0) { "Red" } else { "Green" })
-
-# Calculate hierarchy statistics
-$totalDisplayedGroups = 0
-$groupsByDepth = @{}
-
-function Count-Groups {
-    param([object]$GroupData, [int]$Depth = 0)
-    
-    $script:totalDisplayedGroups++
-    if (-not $groupsByDepth.ContainsKey($Depth)) {
-        $groupsByDepth[$Depth] = 0
-    }
-    $groupsByDepth[$Depth]++
-    
-    if ($GroupData.NestedGroups) {
-        foreach ($nested in $GroupData.NestedGroups) {
-            Count-Groups -GroupData $nested -Depth ($Depth + 1)
-        }
-    }
-}
-
-foreach ($rootGroup in $Data.GroupHierarchy) {
-    Count-Groups -GroupData $rootGroup
-}
-
-Write-Host "`nHierarchy Distribution:" -ForegroundColor Cyan
-for ($i = 0; $i -le ($stats.MaxDepthFound); $i++) {
-    if ($groupsByDepth.ContainsKey($i)) {
-        $percentage = [math]::Round(($groupsByDepth[$i] / $totalDisplayedGroups) * 100, 1)
-        Write-Host "  Depth $i`: $($groupsByDepth[$i]) groups ($percentage%)" -ForegroundColor White
-    }
-}
-
-Write-Host "`nTop 10 Groups by Nested Count:" -ForegroundColor Cyan
-$allGroupsFlat = @()
-
-function Flatten-Groups {
-    param([object]$GroupData)
-    $script:allGroupsFlat += $GroupData
-    if ($GroupData.NestedGroups) {
-        foreach ($nested in $GroupData.NestedGroups) {
-            Flatten-Groups -GroupData $nested
-        }
-    }
-}
-
-foreach ($rootGroup in $Data.GroupHierarchy) {
-    Flatten-Groups -GroupData $rootGroup
-}
-
-$topGroups = $allGroupsFlat | Sort-Object NestedGroupCount -Descending | Select-Object -First 10
-foreach ($group in $topGroups) {
-    $color = if ($group.NestedGroupCount -gt 5) { "Yellow" } elseif ($group.NestedGroupCount -gt 2) { "Green" } else { "White" }
-    Write-Host "  $($group.Name): $($group.NestedGroupCount) nested groups" -ForegroundColor $color
-}
-
-Write-Host "`n" + "="*60 -ForegroundColor Yellow
-```
-
-}
-
-# Main execution
+$allGroups = @{}
+$groupMembers = @{}
 
 try {
-if (-not (Test-Path $JsonPath)) {
-Write-Error “JSON file not found: $JsonPath”
-exit 1
-}
+# Create LDAP connection using existing function
+$connection = New-LDAPConnection -Config $config.ActiveDirectory
 
 ```
-Write-Host "Loading AD group hierarchy data..." -ForegroundColor Gray
-$jsonData = Get-Content $JsonPath -Raw | ConvertFrom-Json
+# Search for all groups
+$searchRequest = New-LDAPSearchRequest `
+    -SearchBase $config.ActiveDirectory.OrganizationalUnit `
+    -Filter "(objectClass=group)" `
+    -Attributes @("distinguishedName", "name", "member")
 
-if ($OutputFile) {
-    # Clear output file
-    Set-Content -Path $OutputFile -Value "AD Group Hierarchy Report"
-    "Generated: $(Get-Date)" | Add-Content -Path $OutputFile
-    "Source: $JsonPath" | Add-Content -Path $OutputFile
-    "`n" + "="*80 | Add-Content -Path $OutputFile
-}
+# Use pagination like other AD scripts
+$pageSize = $config.ActiveDirectory.PageSize
+$pagingControl = New-Object System.DirectoryServices.Protocols.PageResultRequestControl($pageSize)
+$pageNumber = 0
 
-if ($ShowStats) {
-    Show-Statistics -Data $jsonData
-    if ($OutputFile) {
-        "`n`nSTATISTICS (see console output for formatted version)" | Add-Content -Path $OutputFile
-    }
-}
-
-# Filter by specific group if requested
-$groupsToShow = if ($GroupName) {
-    $filteredGroups = @()
+do {
+    $pageNumber++
+    Write-Host "Processing page $pageNumber..."
     
-    function Find-Group {
-        param([object]$GroupData)
+    # Memory check like other scripts
+    if (Test-MemoryPressure -ThresholdGB $config.ActiveDirectory.MemoryThresholdGB `
+                            -WarningGB $config.ActiveDirectory.MemoryWarningThresholdGB) {
+        [System.GC]::Collect()
+    }
+    
+    $searchRequest.Controls.Clear()
+    $searchRequest.Controls.Add($pagingControl)
+    $response = $connection.SendRequest($searchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
+    
+    if ($null -eq $response -or $response.Entries.Count -eq 0) {
+        break
+    }
+    
+    foreach ($entry in $response.Entries) {
+        $attrs = $entry.Attributes
+        $groupDN = $attrs["distinguishedName"][0]
+        $groupName = if ($attrs["name"]) { $attrs["name"][0] } else { "Unknown" }
         
-        if ($GroupData.Name -like "*$GroupName*" -or $GroupData.SamAccountName -like "*$GroupName*") {
-            return $GroupData
-        }
+        $allGroups[$groupDN] = $groupName
         
-        if ($GroupData.NestedGroups) {
-            foreach ($nested in $GroupData.NestedGroups) {
-                $found = Find-Group -GroupData $nested
-                if ($found) {
-                    return $found
+        # Find nested groups
+        $nestedGroups = @()
+        if ($attrs["member"]) {
+            foreach ($memberDN in $attrs["member"]) {
+                # Check if member DN looks like a group
+                if ($memberDN -match "CN=.*") {
+                    $nestedGroups += $memberDN
                 }
             }
         }
-        
-        return $null
+        $groupMembers[$groupDN] = $nestedGroups
     }
     
-    foreach ($rootGroup in $jsonData.GroupHierarchy) {
-        $found = Find-Group -GroupData $rootGroup
-        if ($found) {
-            $filteredGroups += $found
-        }
-    }
+    $cookie = ($response.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
+    $pagingControl.Cookie = $cookie
     
-    if ($filteredGroups.Count -eq 0) {
-        Write-Warning "No groups found matching: $GroupName"
-        exit 1
-    }
+} while ($null -ne $cookie -and $cookie.Length -ne 0)
+
+Write-Host "Found $($allGroups.Count) groups"
+
+# Build nested structure
+Write-Host "Building nested structure..."
+
+function Get-NestedGroups {
+    param($GroupDN)
     
-    $filteredGroups
-} else {
-    $jsonData.GroupHierarchy
-}
-
-if ($groupsToShow.Count -eq 0) {
-    Write-Warning "No groups to display"
-    exit 1
-}
-
-# Display header
-$header = if ($GroupName) { 
-    "AD Group Hierarchy for: $GroupName" 
-} else { 
-    "AD Group Hierarchy (All Root Groups)" 
-}
-
-if ($OutputFile) {
-    "`n$header" | Add-Content -Path $OutputFile
-    "="*80 | Add-Content -Path $OutputFile
-} else {
-    Write-Host "`n$header" -ForegroundColor Yellow
-    Write-Host ("="*80) -ForegroundColor Yellow
-}
-
-# Display hierarchy
-if ($ShowPaths) {
-    Write-Host "`nShowing as paths:" -ForegroundColor Gray
-    foreach ($group in $groupsToShow) {
-        Show-GroupPaths -GroupData $group
-    }
-} else {
-    Write-Host "`nShowing as tree structure:" -ForegroundColor Gray
-    for ($i = 0; $i -lt $groupsToShow.Count; $i++) {
-        $isLast = ($i -eq ($groupsToShow.Count - 1))
-        Show-GroupTree -GroupData $groupsToShow[$i] -IsLast $isLast -MaxDepth $MaxDisplayDepth
-        
-        if (-not $isLast) {
-            if ($OutputFile) {
-                "" | Add-Content -Path $OutputFile
-            } else {
-                Write-Host ""
+    $nestedGroups = @()
+    foreach ($memberDN in $groupMembers[$GroupDN]) {
+        if ($allGroups.ContainsKey($memberDN)) {
+            $nestedGroup = @{
+                Name = $allGroups[$memberDN]
+                NestedGroups = Get-NestedGroups -GroupDN $memberDN
             }
+            $nestedGroups += $nestedGroup
+        }
+    }
+    return $nestedGroups
+}
+
+# Find root groups (not members of other groups)
+$memberOfMap = @{}
+foreach ($groupDN in $groupMembers.Keys) {
+    foreach ($memberDN in $groupMembers[$groupDN]) {
+        if ($allGroups.ContainsKey($memberDN)) {
+            $memberOfMap[$memberDN] = $true
         }
     }
 }
 
-if ($OutputFile) {
-    Write-Host "`nOutput saved to: $OutputFile" -ForegroundColor Green
+$rootGroups = @()
+foreach ($groupDN in $allGroups.Keys) {
+    if (-not $memberOfMap.ContainsKey($groupDN)) {
+        $rootGroup = @{
+            Name = $allGroups[$groupDN]
+            NestedGroups = Get-NestedGroups -GroupDN $groupDN
+        }
+        # Only include if it has nested groups
+        if ($rootGroup.NestedGroups.Count -gt 0) {
+            $rootGroups += $rootGroup
+        }
+    }
 }
 
-Write-Host "`nVisualization complete!" -ForegroundColor Green
+Write-Host "Found $($rootGroups.Count) root groups with nesting"
+
+# Output to JSON
+$outputPath = "C:\temp\nested.json"
+
+# Ensure temp directory exists
+if (-not (Test-Path "C:\temp")) {
+    New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null
+}
+
+$rootGroups | ConvertTo-Json -Depth 50 | Set-Content -Path $outputPath -Encoding UTF8
+
+Write-Host "Nested groups exported to: $outputPath" -ForegroundColor Green
 ```
 
 } catch {
-Write-Error “Error displaying group hierarchy: $_”
+Write-Error “Error collecting nested groups: $_”
 throw
+} finally {
+if ($connection) { $connection.Dispose() }
+[System.GC]::Collect()
 }
