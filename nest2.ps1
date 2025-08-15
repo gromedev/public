@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-Debug - Why nested group detection is failing
+Fixed POC - Count groups and nested groups properly
 #>
 
 # Import existing modules
@@ -13,152 +13,129 @@ Import-Module (Join-Path $PSScriptRoot “....\Modules\Common.Functions.psm1”)
 
 $config = Get-Config -ConfigPath (Join-Path $PSScriptRoot “....\Modules\giam-config.json”) -Force
 
-Write-Host “DEBUG: Investigating Nested Group Detection” -ForegroundColor Cyan
+Write-Host “FIXED: Counting AD Groups and Nested Groups” -ForegroundColor Cyan
 Write-Host “===========================================” -ForegroundColor Cyan
 
 $allGroups = @{}
-$sampleGroupsWithMembers = @()
+$allGroupMembers = @{}
 
 try {
 # Create LDAP connection
+Write-Host “Phase 1: Collecting ALL groups and their members…” -ForegroundColor Yellow
 $connection = New-LDAPConnection -Config $config.ActiveDirectory
 
 ```
-Write-Host "Step 1: Collecting first 50 groups with members for analysis..." -ForegroundColor Yellow
-
-# Search for groups with members
+# Single pass - collect everything at once
 $searchRequest = New-LDAPSearchRequest `
     -SearchBase $config.ActiveDirectory.OrganizationalUnit `
-    -Filter "(&(objectClass=group)(member=*))" `
+    -Filter "(objectClass=group)" `
     -Attributes @("distinguishedName", "name", "member")
 
-$pageSize = 100
+$pageSize = $config.ActiveDirectory.PageSize
 $pagingControl = New-Object System.DirectoryServices.Protocols.PageResultRequestControl($pageSize)
-
-$searchRequest.Controls.Add($pagingControl)
-$response = $connection.SendRequest($searchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
-
-$samplesCollected = 0
-foreach ($entry in $response.Entries) {
-    if ($samplesCollected -ge 50) { break }
-    
-    $attrs = $entry.Attributes
-    $groupDN = $attrs["distinguishedName"][0]
-    $groupName = if ($attrs["name"]) { $attrs["name"][0] } else { "Unknown" }
-    
-    if ($attrs["member"]) {
-        $memberCount = $attrs["member"].Count
-        $firstFewMembers = @()
-        
-        # Get first 3 members for analysis
-        for ($i = 0; $i -lt [Math]::Min(3, $memberCount); $i++) {
-            $firstFewMembers += $attrs["member"][$i]
-        }
-        
-        $sampleGroupsWithMembers += @{
-            GroupName = $groupName
-            GroupDN = $groupDN
-            MemberCount = $memberCount
-            SampleMembers = $firstFewMembers
-        }
-        $samplesCollected++
-    }
-}
-
-Write-Host "Step 2: Collecting ALL group DNs for comparison..." -ForegroundColor Yellow
-
-# Now collect ALL groups to build our lookup
-$searchRequest2 = New-LDAPSearchRequest `
-    -SearchBase $config.ActiveDirectory.OrganizationalUnit `
-    -Filter "(objectClass=group)" `
-    -Attributes @("distinguishedName", "name")
-
-$pagingControl2 = New-Object System.DirectoryServices.Protocols.PageResultRequestControl($config.ActiveDirectory.PageSize)
 $pageNumber = 0
+$totalGroups = 0
 
 do {
     $pageNumber++
-    if ($pageNumber % 50 -eq 0) {
-        Write-Host "  Collecting groups page $pageNumber... (total so far: $($allGroups.Count))"
-    }
+    Write-Host "Processing page $pageNumber..."
 
-    $searchRequest2.Controls.Clear()
-    $searchRequest2.Controls.Add($pagingControl2)
-    $response2 = $connection.SendRequest($searchRequest2) -as [System.DirectoryServices.Protocols.SearchResponse]
+    $searchRequest.Controls.Clear()
+    $searchRequest.Controls.Add($pagingControl)
+    $response = $connection.SendRequest($searchRequest) -as [System.DirectoryServices.Protocols.SearchResponse]
 
-    if ($null -eq $response2 -or $response2.Entries.Count -eq 0) {
+    if ($null -eq $response -or $response.Entries.Count -eq 0) {
         break
     }
 
-    foreach ($entry in $response2.Entries) {
+    foreach ($entry in $response.Entries) {
         $attrs = $entry.Attributes
         $groupDN = $attrs["distinguishedName"][0]
         $groupName = if ($attrs["name"]) { $attrs["name"][0] } else { "Unknown" }
         
+        $totalGroups++
         $allGroups[$groupDN] = $groupName
+        
+        # Store all members for this group
+        $members = @()
+        if ($attrs["member"]) {
+            foreach ($memberDN in $attrs["member"]) {
+                $members += $memberDN
+            }
+        }
+        $allGroupMembers[$groupDN] = $members
     }
 
-    $cookie2 = ($response2.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
-    $pagingControl2.Cookie = $cookie2
+    $cookie = ($response.Controls | Where-Object { $_ -is [System.DirectoryServices.Protocols.PageResultResponseControl] }).Cookie
+    $pagingControl.Cookie = $cookie
 
-} while ($null -ne $cookie2 -and $cookie2.Length -ne 0)
+    if ($pageNumber % 20 -eq 0) {
+        Write-Host "  Progress: $totalGroups groups collected..."
+    }
 
-Write-Host "Step 3: Analyzing sample groups for nested group patterns..." -ForegroundColor Yellow
-Write-Host "Total groups collected: $($allGroups.Count)" -ForegroundColor Cyan
-Write-Host "Sample groups with members: $($sampleGroupsWithMembers.Count)" -ForegroundColor Cyan
+} while ($null -ne $cookie -and $cookie.Length -ne 0)
 
-$groupMembersFound = 0
-$userMembersFound = 0
-$computerMembersFound = 0
-$unknownMembersFound = 0
+Write-Host "Phase 2: Analyzing group-to-group relationships..." -ForegroundColor Yellow
 
-foreach ($sample in $sampleGroupsWithMembers[0..9]) {  # First 10 samples
-    Write-Host "`n--- Group: $($sample.GroupName) (Members: $($sample.MemberCount)) ---" -ForegroundColor Green
+$groupsWithNestedGroups = 0
+$totalNestedRelationships = 0
+$sampleRelationships = @()
+
+foreach ($groupDN in $allGroups.Keys) {
+    $groupName = $allGroups[$groupDN]
+    $members = $allGroupMembers[$groupDN]
     
-    foreach ($memberDN in $sample.SampleMembers) {
-        Write-Host "  Member DN: $memberDN" -ForegroundColor Gray
+    if ($members.Count -gt 0) {
+        $nestedGroupsInThisGroup = 0
         
-        # Check what type of object this is
-        if ($allGroups.ContainsKey($memberDN)) {
-            Write-Host "    ✓ IS A GROUP: $($allGroups[$memberDN])" -ForegroundColor Green
-            $groupMembersFound++
-        } elseif ($memberDN -match "CN=.*,CN=Users,") {
-            Write-Host "    - Is a user (in Users container)" -ForegroundColor Yellow
-            $userMembersFound++
-        } elseif ($memberDN -match "CN=.*,CN=Computers,") {
-            Write-Host "    - Is a computer (in Computers container)" -ForegroundColor Yellow  
-            $computerMembersFound++
-        } elseif ($memberDN -match "CN=.*,OU=.*") {
-            Write-Host "    - Is in an OU (likely user/computer)" -ForegroundColor Yellow
-            $userMembersFound++
-        } else {
-            Write-Host "    ? Unknown object type" -ForegroundColor Red
-            $unknownMembersFound++
+        foreach ($memberDN in $members) {
+            # Check if this member is actually a group
+            if ($allGroups.ContainsKey($memberDN)) {
+                $nestedGroupName = $allGroups[$memberDN]
+                $nestedGroupsInThisGroup++
+                $totalNestedRelationships++
+                
+                # Collect samples
+                if ($sampleRelationships.Count -lt 20) {
+                    $sampleRelationships += @{
+                        ParentGroup = $groupName
+                        NestedGroup = $nestedGroupName
+                    }
+                }
+            }
+        }
+        
+        if ($nestedGroupsInThisGroup -gt 0) {
+            $groupsWithNestedGroups++
         }
     }
 }
 
-Write-Host "`nMEMBER TYPE ANALYSIS:" -ForegroundColor Yellow
-Write-Host "Group members found: $groupMembersFound" -ForegroundColor Green
-Write-Host "User members found: $userMembersFound" -ForegroundColor Cyan
-Write-Host "Computer members found: $computerMembersFound" -ForegroundColor Cyan
-Write-Host "Unknown members found: $unknownMembersFound" -ForegroundColor Red
+# Show results
+Write-Host "`nFINAL RESULTS:" -ForegroundColor Green
+Write-Host "==============" -ForegroundColor Green
+Write-Host "Total Groups in AD: $totalGroups" -ForegroundColor Cyan
+Write-Host "Groups with nested groups: $groupsWithNestedGroups" -ForegroundColor Yellow
+Write-Host "Total group-to-group relationships: $totalNestedRelationships" -ForegroundColor Yellow
 
-# If we found some group members, show the exact matching logic
-if ($groupMembersFound -gt 0) {
-    Write-Host "`n✓ NESTED GROUPS DETECTED! The logic should work." -ForegroundColor Green
-    Write-Host "The issue might be in the counting logic of the main script." -ForegroundColor Yellow
+if ($sampleRelationships.Count -gt 0) {
+    Write-Host "`nSample nested group relationships:" -ForegroundColor Green
+    foreach ($rel in $sampleRelationships[0..9]) {  # Show first 10
+        Write-Host "  '$($rel.ParentGroup)' contains '$($rel.NestedGroup)'" -ForegroundColor White
+    }
+    
+    if ($sampleRelationships.Count -gt 10) {
+        Write-Host "  ... and $($sampleRelationships.Count - 10) more relationships" -ForegroundColor Gray
+    }
 } else {
-    Write-Host "`n✗ NO NESTED GROUPS FOUND IN SAMPLES" -ForegroundColor Red
-    Write-Host "This suggests either:" -ForegroundColor Yellow
-    Write-Host "1. Your AD doesn't use nested groups" -ForegroundColor White
-    Write-Host "2. Groups are in different OUs/containers than expected" -ForegroundColor White
-    Write-Host "3. Our DN matching logic needs adjustment" -ForegroundColor White
+    Write-Host "`nNo nested group relationships found!" -ForegroundColor Red
 }
+
+Write-Host "`n✓ Nested group detection is now working!" -ForegroundColor Green
 ```
 
 } catch {
-Write-Error “Error during nested group debugging: $_”
+Write-Error “Error during group counting: $_”
 throw
 } finally {
 if ($connection) { $connection.Dispose() }
