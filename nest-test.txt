@@ -1,0 +1,88 @@
+Step 3: Analyzing sample groups for nested group patterns...
+Total groups collected: 181291
+Sample groups with members: 50
+
+--- Group: Users (Members: 5) ---
+  Member DN: CN=JWRQ,OU=NovoNordisk,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=PKL,OU=NovoNordisk,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=S-1-5-11,CN=ForeignSecurityPrincipals,DC=corp,DC=novocorp,DC=net
+    ? Unknown object type
+
+--- Group: Domain Users (Members: 4) ---
+  Member DN: CN=Service Account - Line 30 Time Sight Viewer,OU=ServiceAccounts,OU=USCL,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=Service Account - Line 34 Time Sight Viewer,OU=ServiceAccounts,OU=USCL,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=Service Account - Snap Timer,OU=ServiceAccounts,OU=USCL,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+
+--- Group: Domain Admins (Members: 5) ---
+  Member DN: CN=T0-DomainAdmins,OU=RoleGroups,OU=Groups,OU=Tier0,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: T0-DomainAdmins
+  Member DN: CN=NN-DomainAdmins,OU=GroupsMan,OU=UsersAndGroups,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: NN-DomainAdmins
+  Member DN: CN=AutoUserTest,OU=NNITGen,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+
+--- Group: Administrators (Members: 5) ---
+  Member DN: CN=NNITPIMRECON,OU=ServiceAccounts,OU=NNIT,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=NNITPIMTESTRECON,OU=ServiceAccounts,OU=NNIT,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=NNITPIMRECON2,OU=ServiceAccounts,OU=NNIT,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+
+--- Group: Allowed RODC Password Replication Group (Members: 2) ---
+  Member DN: CN=Domain Computers,CN=Users,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: Domain Computers
+  Member DN: CN=Domain Users,CN=Users,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: Domain Users
+
+--- Group: Denied RODC Password Replication Group (Members: 8) ---
+  Member DN: CN=Enterprise Admins,CN=Users,DC=novocorp,DC=net
+    - Is a user (in Users container)
+  Member DN: CN=Read-only Domain Controllers,CN=Users,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: Read-only Domain Controllers
+  Member DN: CN=krbtgt,CN=Users,DC=corp,DC=novocorp,DC=net
+    - Is a user (in Users container)
+
+--- Group: Terminal Server License Servers (Members: 29) ---
+  Member DN: CN=RPAPPEU1HQ1739G,OU=AzureHybridJoined,OU=AHP,OU=NLAM,OU=Sites,OU=Server,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=PSLICPASXRDS01,OU=RDS,OU=Infrastructure,OU=PSCorp,OU=Sites,OU=New-Server,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+  Member DN: CN=APPDKBA2324,OU=APP,OU=Server,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+
+--- Group: Pre-Windows 2000 Compatible Access (Members: 4) ---
+  Member DN: CN=S-1-5-21-271398891-1995200035-6498272-1765,CN=ForeignSecurityPrincipals,DC=corp,DC=novocorp,DC=net
+    ? Unknown object type
+  Member DN: CN=Exchange Domain Servers,CN=Users,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: Exchange Domain Servers
+  Member DN: CN=S-1-1-0,CN=ForeignSecurityPrincipals,DC=corp,DC=novocorp,DC=net
+    ? Unknown object type
+
+--- Group: Windows Authorization Access Group (Members: 6) ---
+  Member DN: CN=RTCComponentUniversalServices,CN=Users,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: RTCComponentUniversalServices
+  Member DN: CN=SCMDMDeviceManagementServers (NN-MDM),OU=SCMDM Infrastructure Groups (NN-MDM),DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: SCMDMDeviceManagementServers (NN-MDM)
+  Member DN: CN=SPGPP16TC2WTAcc,OU=ServiceAccounts,OU=INBG,OU=Company,DC=corp,DC=novocorp,DC=net
+    - Is in an OU (likely user/computer)
+
+--- Group: Guests (Members: 2) ---
+  Member DN: CN=Guest,CN=Users,DC=corp,DC=novocorp,DC=net
+    - Is a user (in Users container)
+  Member DN: CN=Domain Guests,CN=Users,DC=corp,DC=novocorp,DC=net
+    ✓ IS A GROUP: Domain Guests
+
+MEMBER TYPE ANALYSIS:
+Group members found: 9
+User members found: 16
+Computer members found: 0
+Unknown members found: 3
+
+✓ NESTED GROUPS DETECTED! The logic should work.
+The issue might be in the counting logic of the main script.
