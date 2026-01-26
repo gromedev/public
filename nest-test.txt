@@ -1,3 +1,5 @@
+https://claude.ai/magic-link#f9fee37daa81ec0cf833b3109be065b0:dGhvbWFzQGdyb21lLmRldg==
+
 Step 3: Analyzing sample groups for nested group patterns...
 Total groups collected: 181291
 Sample groups with members: 50
