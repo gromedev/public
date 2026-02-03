@@ -12,6 +12,9 @@
     - Active Tailscale connections
     - DNS cache for Tailscale queries
     - Network configuration
+    - Routing table for exit nodes
+    - CGNAT range conflicts
+    - Zscaler Client Connector presence
     - Detection risk assessment
 
 .NOTES
@@ -22,8 +25,11 @@ Write-Host "`n=== ZSCALER DETECTION RISK ASSESSMENT ===" -ForegroundColor Cyan
 Write-Host "Analyzing your configuration for Zscaler detection vectors...`n" -ForegroundColor Yellow
 
 $detectionScore = 0
-$maxScore = 10
+$maxScore = 15  # Updated to account for exit node and CGNAT checks
 $findings = @()
+$hasDirectConnection = $false
+$tailscaleDefaultRoute = $false
+$hasClientConnector = $false
 
 # ============================================================================
 # CHECK 1: Zscaler Certificate (SSL Inspection Capability)
@@ -396,28 +402,171 @@ try {
 Write-Host ""
 
 # ============================================================================
-# CHECK 10: Zscaler Client/Process Detection
+# CHECK 10: Zscaler Client Connector Detection (Comprehensive)
 # ============================================================================
-Write-Host "[10/10] Checking for Zscaler Processes..." -ForegroundColor Green
+Write-Host "[10/10] Checking for Zscaler Client Connector..." -ForegroundColor Green
+
+$hasZscalerClient = $false
 
 try {
+    # Check for Zscaler processes
     $zscalerProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object {
         $_.ProcessName -like "*zscaler*" -or 
         $_.ProcessName -like "*ZSA*" -or
-        $_.ProcessName -like "*ZEN*"
+        $_.ProcessName -like "*ZEN*" -or
+        $_.ProcessName -eq "ZSATunnel" -or
+        $_.ProcessName -eq "ZSAService"
     }
     
     if ($zscalerProcesses) {
-        Write-Host "  Status: ZSCALER PROCESSES FOUND" -ForegroundColor Red
+        Write-Host "  ZSCALER CLIENT CONNECTOR DETECTED" -ForegroundColor Red
         $zscalerProcesses | ForEach-Object {
             Write-Host "    Process: $($_.ProcessName) (PID: $($_.Id))" -ForegroundColor Yellow
         }
-        $findings += "Zscaler client running - active monitoring"
-    } else {
-        Write-Host "  Status: No Zscaler processes detected" -ForegroundColor Green
+        $hasZscalerClient = $true
+        $findings += "Zscaler Client Connector running - endpoint monitoring active"
+    }
+    
+    # Check for Zscaler services
+    $zscalerServices = Get-Service -ErrorAction SilentlyContinue | Where-Object {
+        $_.DisplayName -like "*zscaler*" -or 
+        $_.Name -like "*ZSA*" -or
+        $_.Name -like "*ZEN*"
+    }
+    
+    if ($zscalerServices) {
+        if (-not $hasZscalerClient) {
+            Write-Host "  ZSCALER SERVICES DETECTED" -ForegroundColor Red
+        }
+        $zscalerServices | ForEach-Object {
+            Write-Host "    Service: $($_.DisplayName) - $($_.Status)" -ForegroundColor Yellow
+        }
+        $hasZscalerClient = $true
+        if ($findings -notcontains "Zscaler Client Connector running - endpoint monitoring active") {
+            $findings += "Zscaler services installed - endpoint monitoring capable"
+        }
+    }
+    
+    # Check for Zscaler network adapters
+    $zscalerAdapters = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object {
+        $_.InterfaceDescription -like "*zscaler*" -or 
+        $_.InterfaceDescription -like "*ZEN*" -or
+        $_.Name -like "*ZSA*"
+    }
+    
+    if ($zscalerAdapters) {
+        if (-not $hasZscalerClient) {
+            Write-Host "  ZSCALER NETWORK ADAPTER DETECTED" -ForegroundColor Red
+        }
+        $zscalerAdapters | ForEach-Object {
+            Write-Host "    Adapter: $($_.Name) - $($_.InterfaceDescription)" -ForegroundColor Yellow
+        }
+        $hasZscalerClient = $true
+    }
+    
+    if (-not $hasZscalerClient) {
+        Write-Host "  Status: No Zscaler Client Connector detected on this device" -ForegroundColor Green
+        $findings += "No Zscaler Client Connector - endpoint monitoring not present"
     }
 } catch {
-    Write-Host "  Could not check for Zscaler processes" -ForegroundColor Gray
+    Write-Host "  Could not check for Zscaler Client Connector" -ForegroundColor Gray
+}
+
+Write-Host ""
+
+# ============================================================================
+# CHECK 11: Routing Table Analysis (Exit Node / Full Tunnel Detection)
+# ============================================================================
+Write-Host "[11/12] Checking Routing Table for VPN Detection Vectors..." -ForegroundColor Green
+
+try {
+    # Check for default route
+    $defaultRoutes = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue
+    
+    $tailscaleDefaultRoute = $defaultRoutes | Where-Object {
+        $_.InterfaceAlias -like "*Tailscale*"
+    }
+    
+    if ($tailscaleDefaultRoute) {
+        Write-Host "  WARNING: DEFAULT ROUTE POINTS TO TAILSCALE" -ForegroundColor Red
+        Write-Host "    This indicates EXIT NODE / FULL TUNNEL mode" -ForegroundColor Yellow
+        Write-Host "    Zscaler Client Connector WILL detect this!" -ForegroundColor Yellow
+        $detectionScore += 5
+        $findings += "Tailscale exit node active - easily detected by Client Connector"
+        $tailscaleDefaultRoute = $true
+    } else {
+        Write-Host "  Status: Default route is normal (not Tailscale)" -ForegroundColor Green
+        $findings += "No exit node - split tunnel only (harder to detect)"
+        $tailscaleDefaultRoute = $false
+    }
+    
+    # Show actual default route
+    $actualDefault = $defaultRoutes | Select-Object -First 1
+    if ($actualDefault) {
+        Write-Host "  Default Route: $($actualDefault.NextHop) via $($actualDefault.InterfaceAlias)" -ForegroundColor Gray
+    }
+    
+    # Check Tailscale-specific routes
+    $tailscaleRoutes = Get-NetRoute -ErrorAction SilentlyContinue | Where-Object {
+        $_.InterfaceAlias -like "*Tailscale*" -and $_.DestinationPrefix -ne "0.0.0.0/0"
+    }
+    
+    if ($tailscaleRoutes) {
+        $routeCount = ($tailscaleRoutes | Measure-Object).Count
+        Write-Host "  Info: $routeCount Tailscale-specific routes (split tunnel)" -ForegroundColor Cyan
+    }
+    
+} catch {
+    Write-Host "  Could not analyze routing table" -ForegroundColor Gray
+    $tailscaleDefaultRoute = $false
+}
+
+Write-Host ""
+
+# ============================================================================
+# CHECK 12: CGNAT Range Conflict Detection
+# ============================================================================
+Write-Host "[12/12] Checking for CGNAT Range Conflicts..." -ForegroundColor Green
+
+$cgnatConflict = $false
+
+try {
+    # Check for 100.x.y.z addresses NOT on Tailscale adapter
+    $cgnatAddresses = Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object {
+        $_.IPAddress -match "^100\." -and
+        $_.InterfaceAlias -notlike "*Tailscale*"
+    }
+    
+    if ($cgnatAddresses) {
+        Write-Host "  WARNING: CGNAT RANGE CONFLICT DETECTED" -ForegroundColor Yellow
+        Write-Host "  Non-Tailscale adapters using 100.x.y.z range:" -ForegroundColor Yellow
+        $cgnatAddresses | ForEach-Object {
+            Write-Host "    $($_.IPAddress) on $($_.InterfaceAlias)" -ForegroundColor Gray
+            if ($_.InterfaceAlias -like "*zscaler*" -or $_.InterfaceAlias -like "*ZPA*") {
+                Write-Host "      ^ This is a Zscaler adapter - CONFLICT!" -ForegroundColor Red
+                $detectionScore += 2
+                $findings += "CGNAT range conflict with Zscaler - may trigger detection"
+                $cgnatConflict = $true
+            }
+        }
+    } else {
+        Write-Host "  Status: No CGNAT range conflicts detected" -ForegroundColor Green
+        $cgnatConflict = $false
+    }
+    
+    # Show Tailscale's CGNAT address
+    $tailscaleIP = Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object {
+        $_.IPAddress -match "^100\." -and
+        $_.InterfaceAlias -like "*Tailscale*"
+    } | Select-Object -First 1
+    
+    if ($tailscaleIP) {
+        Write-Host "  Tailscale IP: $($tailscaleIP.IPAddress)" -ForegroundColor Cyan
+    }
+    
+} catch {
+    Write-Host "  Could not check for CGNAT conflicts" -ForegroundColor Gray
+    $cgnatConflict = $false
 }
 
 Write-Host ""
@@ -427,6 +576,9 @@ Write-Host ""
 # ============================================================================
 Write-Host "=== DETECTION RISK ASSESSMENT ===" -ForegroundColor Cyan
 Write-Host ""
+
+# Determine if Client Connector is present
+$hasClientConnector = $findings -match "Zscaler Client Connector" -or $findings -match "Zscaler services"
 
 # Calculate risk level
 $riskPercentage = [math]::Round(($detectionScore / $maxScore) * 100)
@@ -444,6 +596,18 @@ $riskColor = if ($riskPercentage -lt 20) { "Green" }
 
 Write-Host "Detection Risk Score: $detectionScore / $maxScore ($riskPercentage%)" -ForegroundColor $riskColor
 Write-Host "Risk Level: $riskLevel" -ForegroundColor $riskColor
+Write-Host ""
+
+# Detection type analysis
+if ($hasClientConnector) {
+    Write-Host "DETECTION TYPE: Client Connector + Network-Level" -ForegroundColor Yellow
+    Write-Host "  Zscaler Client Connector is installed on this device" -ForegroundColor Yellow
+    Write-Host "  Can monitor: processes, routing table, network adapters" -ForegroundColor Gray
+} else {
+    Write-Host "DETECTION TYPE: Network-Level Only" -ForegroundColor Green
+    Write-Host "  No Zscaler Client Connector detected on this device" -ForegroundColor Green
+    Write-Host "  Only network traffic is monitored (via ZIA)" -ForegroundColor Gray
+}
 Write-Host ""
 
 # Display findings
@@ -477,26 +641,69 @@ if ($detectionScore -eq 0) {
         Write-Host "  ACTION: Enable DNS over HTTPS to hide queries" -ForegroundColor Yellow
         Write-Host "    Run: .\Setup-TailscaleDERPOnly-Enhanced.ps1" -ForegroundColor Gray
     }
+    if ($hasClientConnector -and -not $tailscaleDefaultRoute) {
+        Write-Host "  NOTE: Client Connector detected, but you're using split tunnel" -ForegroundColor Cyan
+        Write-Host "        This is much harder to detect than full tunnel" -ForegroundColor Cyan
+    }
 } elseif ($detectionScore -le 6) {
     Write-Host "MODERATE RISK! Several detection vectors present." -ForegroundColor Yellow
     Write-Host "  PRIORITY ACTIONS:" -ForegroundColor Red
+    
+    if ($tailscaleDefaultRoute) {
+        Write-Host "    1. URGENT: Disable Tailscale exit node immediately!" -ForegroundColor Red
+        Write-Host "       Exit nodes create full tunnel = easily detected" -ForegroundColor White
+        Write-Host "       Run: tailscale set --exit-node=" -ForegroundColor Gray
+    }
+    
     if (-not (Get-DnsClientDohServerAddress -ErrorAction SilentlyContinue)) {
-        Write-Host "    1. Enable DNS over HTTPS immediately" -ForegroundColor White
+        Write-Host "    2. Enable DNS over HTTPS immediately" -ForegroundColor White
     }
+    
     if ((Get-NetFirewallRule -DisplayName "Block Tailscale Direct UDP" -ErrorAction SilentlyContinue) -eq $null) {
-        Write-Host "    2. Enable DERP-only mode (force TCP/443)" -ForegroundColor White
+        Write-Host "    3. Enable DERP-only mode (force TCP/443)" -ForegroundColor White
     }
+    
+    if ($hasClientConnector) {
+        Write-Host "  NOTE: Client Connector is monitoring this device" -ForegroundColor Yellow
+        Write-Host "        Consider using a VM without Client Connector instead" -ForegroundColor Yellow
+    }
+    
     Write-Host "    Run: .\Setup-TailscaleDERPOnly-Enhanced.ps1" -ForegroundColor Gray
 } else {
     Write-Host "HIGH RISK! Multiple detection vectors active." -ForegroundColor Red
     Write-Host "  URGENT ACTIONS REQUIRED:" -ForegroundColor Red
-    Write-Host "    1. Run setup script immediately:" -ForegroundColor White
+    
+    if ($tailscaleDefaultRoute) {
+        Write-Host "    1. CRITICAL: Disable exit node NOW!" -ForegroundColor Red
+        Write-Host "       Command: tailscale set --exit-node=" -ForegroundColor White
+    }
+    
+    Write-Host "    2. Run setup script immediately:" -ForegroundColor White
     Write-Host "       .\Setup-TailscaleDERPOnly-Enhanced.ps1" -ForegroundColor Gray
-    Write-Host "    2. Consider using cellular hotspot instead" -ForegroundColor White
-    Write-Host "    3. Limit Tailscale usage to non-sensitive times" -ForegroundColor White
+    
+    if ($hasClientConnector) {
+        Write-Host "    3. RECOMMENDED: Use Tailscale on a separate device/VM" -ForegroundColor White
+        Write-Host "       Client Connector cannot monitor separate devices" -ForegroundColor Gray
+    } else {
+        Write-Host "    3. Consider using cellular hotspot instead" -ForegroundColor White
+    }
+    
+    Write-Host "    4. Limit Tailscale usage to non-sensitive times" -ForegroundColor White
 }
 
 Write-Host ""
+
+# Client Connector specific guidance
+if ($hasClientConnector) {
+    Write-Host "=== CLIENT CONNECTOR MITIGATION ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Zscaler Client Connector is installed. Additional precautions:" -ForegroundColor Yellow
+    Write-Host "  - NEVER use exit nodes (creates detectable default route)" -ForegroundColor White
+    Write-Host "  - Keep split tunnel only (specific 100.x.y.z routes)" -ForegroundColor White
+    Write-Host "  - Consider using Tailscale on a VM in bridged mode" -ForegroundColor White
+    Write-Host "  - Or use a separate physical device without Client Connector" -ForegroundColor White
+    Write-Host ""
+}
 Write-Host "=== STEALTH CHECKLIST ===" -ForegroundColor Cyan
 Write-Host ""
 
@@ -505,7 +712,10 @@ $checklist = @(
     @{Item = "DERP-only mode active (3 firewall rules)"; Status = $activeRules -eq 3},
     @{Item = "No direct UDP connections (verified via Tailscale status)"; Status = -not $hasDirectConnection},
     @{Item = "No Tailscale DNS in cache"; Status = -not $dnsCache},
-    @{Item = "Using public DNS (not corporate)"; Status = -not $usingCorporateDNS}
+    @{Item = "Using public DNS (not corporate)"; Status = -not $usingCorporateDNS},
+    @{Item = "No exit node / full tunnel active"; Status = -not $tailscaleDefaultRoute},
+    @{Item = "No CGNAT range conflicts"; Status = -not $cgnatConflict},
+    @{Item = "No Zscaler Client Connector on this device"; Status = -not $hasClientConnector}
 )
 
 foreach ($item in $checklist) {
