@@ -2,6 +2,10 @@
 <#
 .SYNOPSIS
     Identifies inactive service accounts in Active Directory.
+
+.USAGE
+    .\Collect-InactiveServiceAccounts.ps1  #defaults: 90 days, current dir
+    .\Collect-InactiveServiceAccounts.ps1 -InactiveDays 30 -OutputPath C:\Reports
 #>
 
 [CmdletBinding()]
@@ -83,7 +87,7 @@ function Get-CSVSafeValue {
 function Get-ServiceAccountType {
     param ([object]$Attributes)
 
-    $objectClasses = @()
+    $objectClasses = [System.Collections.Generic.List[string]]::new()
 
     if ($Attributes["objectClass"]) {
         foreach ($obj in $Attributes["objectClass"]) {
@@ -92,7 +96,7 @@ function Get-ServiceAccountType {
                     $stringValue = [System.Text.Encoding]::UTF8.GetString($obj)
                     $stringValue = $stringValue.Trim([char]0)
                     if (-not [string]::IsNullOrWhiteSpace($stringValue)) {
-                        $objectClasses += $stringValue
+                        $objectClasses.Add($stringValue)
                     }
                 }
                 catch {
@@ -100,19 +104,19 @@ function Get-ServiceAccountType {
                         $stringValue = [System.Text.Encoding]::ASCII.GetString($obj)
                         $stringValue = $stringValue.Trim([char]0)
                         if (-not [string]::IsNullOrWhiteSpace($stringValue)) {
-                            $objectClasses += $stringValue
+                            $objectClasses.Add($stringValue)
                         }
                     }
                     catch { }
                 }
             }
             elseif ($obj -is [string]) {
-                $objectClasses += $obj.Trim()
+                $objectClasses.Add($obj.Trim())
             }
             else {
                 $stringValue = $obj.ToString().Trim()
                 if (-not [string]::IsNullOrWhiteSpace($stringValue)) {
-                    $objectClasses += $stringValue
+                    $objectClasses.Add($stringValue)
                 }
             }
         }
@@ -327,19 +331,19 @@ try {
             # servicePrincipalName (multi-valued, semicolon-delimited)
             $spns = ""
             if ($attrs["servicePrincipalName"]) {
-                $spnList = @()
+                $spnList = [System.Collections.Generic.List[string]]::new()
                 foreach ($spn in $attrs["servicePrincipalName"]) {
                     if ($spn -is [byte[]]) {
                         try {
-                            $spnList += [System.Text.Encoding]::UTF8.GetString($spn).Trim([char]0)
+                            $spnList.Add([System.Text.Encoding]::UTF8.GetString($spn).Trim([char]0))
                         }
                         catch { }
                     }
                     elseif ($spn -is [string]) {
-                        $spnList += $spn
+                        $spnList.Add($spn)
                     }
                     else {
-                        $spnList += $spn.ToString()
+                        $spnList.Add($spn.ToString())
                     }
                 }
                 $spns = Get-CSVSafeValue -Value ($spnList -join "; ")
